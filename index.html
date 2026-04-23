@@ -590,32 +590,29 @@
     }
     .reading-scroll {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0;
-      overflow: hidden;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.75rem;
+      align-items: start;
     }
     .book-card {
       background: none;
-      border-right: 1px solid var(--rule);
-      border-bottom: 1px solid var(--rule);
-      padding: 2rem 2rem 2rem 0;
-      margin-right: 2rem;
+      padding: 0;
       cursor: pointer;
       text-decoration: none;
       display: flex;
       flex-direction: column;
+      align-items: center;
       gap: 0;
-      transition: opacity 0.2s;
-      position: relative;
+      width: 100%;
+      transition: transform 0.25s ease, opacity 0.25s ease;
     }
-    .book-card:nth-child(3n) { border-right: none; margin-right: 0; }
-    .book-card:hover { opacity: 0.7; }
+    .book-card:hover {
+      transform: translateY(-4px);
+      opacity: 0.9;
+    }
     .book-card.hidden { display: none; }
     .carousel-nav {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 2rem;
+      display: none;
     }
     .carousel-arrows {
       display: flex;
@@ -664,27 +661,24 @@
       width: 22px;
       border-radius: 3px;
     }
-    .book-num {
-      font-size: 0.68rem;
-      font-weight: 500;
-      letter-spacing: 0.1em;
-      color: var(--ink-faint);
-      margin-bottom: 1.25rem;
-    }
+    .book-num { display: none; }
     .book-cover {
       width: 100%;
-      height: 140px;
-      border-radius: 4px;
+      aspect-ratio: 3 / 4;
+      border-radius: 22px;
       overflow: hidden;
-      margin-bottom: 1.25rem;
-      display: none;
+      margin-bottom: 1.2rem;
+      display: block;
+      box-shadow: 0 14px 35px rgba(0,0,0,0.14);
+      background: rgba(255,255,255,0.35);
     }
     .book-cover img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       object-position: center;
-      border-radius: 4px;
+      border-radius: 22px;
+      filter: saturate(0.95);
     }
     .book-card.has-cover .book-cover { display: block; }
     .book-card.has-cover .book-spine { display: none; }
@@ -699,36 +693,36 @@
     .book-spine.warm { background: var(--accent-warm); }
     .book-spine.faint { background: var(--ink-faint); }
     .book-category {
-      font-size: 0.68rem;
+      font-size: 0.64rem;
       font-weight: 500;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--ink-faint);
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.45rem;
+      background: rgba(255,255,255,0.45);
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      padding: 0.1rem 0.5rem;
     }
     .book-card h3 {
       font-family: 'Lora', serif;
-      font-size: 1.1rem;
+      font-size: 1.35rem;
       color: var(--ink);
-      line-height: 1.25;
-      margin-bottom: 0.3rem;
+      line-height: 1.1;
+      margin-bottom: 0.45rem;
       font-weight: 400;
+      text-align: center;
     }
     .book-card .book-author {
-      font-size: 0.8rem;
+      font-size: 0.86rem;
       color: var(--ink-faint);
-      margin-bottom: 1rem;
+      margin-bottom: 0.8rem;
       font-style: italic;
+      text-align: center;
     }
-    .book-card .book-excerpt {
-      font-size: 0.82rem;
-      color: var(--ink-light);
-      line-height: 1.65;
-      font-weight: 300;
-      flex: 1;
-    }
+    .book-card .book-excerpt { display: none; }
     .book-card .book-read-link {
-      margin-top: 1.25rem;
+      margin-top: 0;
       font-size: 0.78rem;
       color: var(--ink-faint);
       display: flex;
@@ -888,18 +882,17 @@
 
       .projects-grid { grid-template-columns: 1fr; }
 
-      /* Reading - single column on mobile */
+      /* Reading - compact cards on mobile */
       .reading-scroll {
-        grid-template-columns: 1fr !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 1rem !important;
       }
       .book-card {
-        border-right: none !important;
-        border-bottom: 1px solid var(--rule) !important;
-        margin-right: 0 !important;
-        padding: 1.5rem 0 !important;
+        width: 100% !important;
+        padding: 0 !important;
       }
-      .book-card:last-child { border-bottom: none !important; }
-      .book-card:nth-child(3n) { border-right: none !important; }
+      .book-card h3 { font-size: 1.2rem !important; }
+      .book-card .book-author { font-size: 0.75rem !important; }
 
       .carousel-nav { margin-top: 1.5rem; }
 
@@ -944,6 +937,7 @@
       transform: translateX(-50%) translateY(0);
     }
 </style>
+  <link rel="stylesheet" href="assets/ama-chat.css" />
 </head>
 <body>
 
@@ -1146,8 +1140,9 @@
     <div class="reading-carousel-wrap">
     <div class="reading-scroll" id="bookGrid">
 
-      <a class="book-card" onclick="openBook('book3'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book3'); return false;" href="#">
         <p class="book-num">01</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/0735211299-L.jpg" alt="Atomic Habits book cover" loading="lazy" /></div>
         <div class="book-spine faint"></div>
         <p class="book-category">Mindset</p>
         <h3>Atomic Habits</h3>
@@ -1156,8 +1151,9 @@
         <span class="book-read-link">Read my notes →</span>
       </a>
 
-      <a class="book-card" onclick="openBook('book4'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book4'); return false;" href="#">
         <p class="book-num">02</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/1501124021-L.jpg" alt="Principles book cover" loading="lazy" /></div>
         <div class="book-spine" style="background:var(--ink);"></div>
         <p class="book-category">Finance &amp; Life</p>
         <h3>Principles</h3>
@@ -1166,8 +1162,9 @@
         <span class="book-read-link">Read my notes →</span>
       </a>
 
-      <a class="book-card" onclick="openBook('book5'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book5'); return false;" href="#">
         <p class="book-num">03</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/1416573186-L.jpg" alt="The Tao of Warren Buffett book cover" loading="lazy" /></div>
         <div class="book-spine" style="background:var(--accent-warm);"></div>
         <p class="book-category">Investing</p>
         <h3>Buffettology</h3>
@@ -1176,8 +1173,9 @@
         <span class="book-read-link">Read my notes →</span>
       </a>
 
-      <a class="book-card" onclick="openBook('book6'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book6'); return false;" href="#">
         <p class="book-num">04</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/1591845572-L.jpg" alt="The Personal MBA book cover" loading="lazy" /></div>
         <div class="book-spine" style="background:var(--ink-faint);"></div>
         <p class="book-category">Business</p>
         <h3>Mi MBA Personal</h3>
@@ -1186,8 +1184,9 @@
         <span class="book-read-link">Read my notes →</span>
       </a>
 
-      <a class="book-card" onclick="openBook('book7'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book7'); return false;" href="#">
         <p class="book-num">05</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/080701429X-L.jpg" alt="Man's Search for Meaning book cover" loading="lazy" /></div>
         <div class="book-spine" style="background:#7a9e7e;"></div>
         <p class="book-category">Mindset</p>
         <h3>El Hombre en Busca de Sentido</h3>
@@ -1196,8 +1195,9 @@
         <span class="book-read-link">Read my notes →</span>
       </a>
 
-      <a class="book-card" onclick="openBook('book8'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book8'); return false;" href="#">
         <p class="book-num">06</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/1599869772-L.jpg" alt="The Art of War book cover" loading="lazy" /></div>
         <div class="book-spine" style="background:var(--ink);"></div>
         <p class="book-category">Strategy</p>
         <h3>The Art of War</h3>
@@ -1206,8 +1206,9 @@
         <span class="book-read-link">Read my notes →</span>
       </a>
 
-      <a class="book-card" onclick="openBook('book9'); return false;" href="#">
+      <a class="book-card has-cover" onclick="openBook('book9'); return false;" href="#">
         <p class="book-num">07</p>
+        <div class="book-cover"><img src="https://covers.openlibrary.org/b/isbn/0393254593-L.jpg" alt="The Undoing Project book cover" loading="lazy" /></div>
         <div class="book-spine" style="background:var(--accent);"></div>
         <p class="book-category">Behavioural Science</p>
         <h3>The Undoing Project</h3>
@@ -1408,76 +1409,11 @@
     }
   </script>
   <script>
-    const BOOKS_PER_PAGE = 6;
-    const allCards = () => document.querySelectorAll('#bookGrid .book-card');
-    let currentPage = 0;
-
-    function getTotalPages() {
-      return Math.ceil(allCards().length / BOOKS_PER_PAGE);
+    function carouselMove() {
+      // Carousel controls disabled: all books are shown in a responsive grid.
     }
-
-    function renderCarousel(animate) {
-      const grid = document.getElementById('bookGrid');
-      const cards = allCards();
-      const total = cards.length;
-      const totalPages = Math.ceil(total / BOOKS_PER_PAGE);
-      const start = currentPage * BOOKS_PER_PAGE;
-      const end = start + BOOKS_PER_PAGE;
-
-      const doRender = () => {
-        cards.forEach((card, i) => {
-          card.classList.toggle('hidden', i < start || i >= end);
-          card.style.borderBottom = '';
-          card.style.opacity = '';
-          card.style.transform = '';
-        });
-
-        const visible = Array.from(cards).filter((_, i) => i >= start && i < end);
-        const lastRowStart = visible.length - (visible.length % 3 || 3);
-        visible.slice(lastRowStart).forEach(c => c.style.borderBottom = 'none');
-
-        // Staggered fade-in
-        visible.forEach((card, i) => {
-          card.style.opacity = '0';
-          card.style.transform = 'translateY(10px)';
-          setTimeout(() => {
-            card.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
-            card.style.opacity = '1';
-            card.style.transform = 'translateY(0)';
-          }, i * 55);
-        });
-
-        // Dots
-        const dots = document.getElementById('carouselDots');
-        dots.innerHTML = '';
-        for (let i = 0; i < totalPages; i++) {
-          const d = document.createElement('div');
-          d.className = 'carousel-dot' + (i === currentPage ? ' active' : '');
-          d.onclick = () => { currentPage = i; renderCarousel(true); };
-          dots.appendChild(d);
-        }
-
-        document.getElementById('btnPrev').disabled = currentPage === 0;
-        document.getElementById('btnNext').disabled = currentPage >= totalPages - 1;
-      };
-
-      if (animate) {
-        grid.style.transition = 'opacity 0.2s ease';
-        grid.style.opacity = '0';
-        setTimeout(() => { doRender(); grid.style.opacity = '1'; }, 200);
-      } else {
-        doRender();
-      }
-    }
-
-    function carouselMove(dir) {
-      const total = Math.ceil(allCards().length / BOOKS_PER_PAGE);
-      currentPage = Math.max(0, Math.min(currentPage + dir, total - 1));
-      renderCarousel(true);
-    }
-
-    document.addEventListener('DOMContentLoaded', () => renderCarousel(false));
   </script>
+
 
   <div class="email-toast" id="emailToast">📋 julenbeltranperez@gmail.com copied!</div>
 
@@ -1509,5 +1445,37 @@
       setTimeout(() => toast.classList.remove('show'), 3000);
     }
   </script>
+
+
+  <!-- Ask Me Anything Widget -->
+  <button id="ama-toggle" class="ama-toggle" aria-label="Open Ask Me Anything chat" aria-expanded="false" aria-controls="ama-panel">
+    Ask Me Anything
+  </button>
+
+  <section id="ama-panel" class="ama-panel" aria-hidden="true" aria-label="Ask Me Anything chat panel">
+    <header class="ama-header">
+      <h2>Ask Me Anything</h2>
+      <button id="ama-close" class="ama-close" aria-label="Close chat">✕</button>
+    </header>
+
+    <div id="ama-messages" class="ama-messages" aria-live="polite" aria-atomic="false">
+      <div class="ama-message ama-assistant">
+        Hey, I’m Julen 👋 Ask me about my studies, finance interests, career goals, or mindset.
+      </div>
+    </div>
+
+    <div id="ama-typing" class="ama-typing" hidden>
+      <span></span><span></span><span></span>
+    </div>
+
+    <form id="ama-form" class="ama-form" autocomplete="off">
+      <label for="ama-input" class="sr-only">Type your message</label>
+      <input id="ama-input" class="ama-input" type="text" placeholder="Ask me something..." maxlength="500" required />
+      <button id="ama-send" class="ama-send" type="submit">Send</button>
+    </form>
+  </section>
+
+  <script defer src="assets/ama-chat.js"></script>
+
 </body>
 </html>
