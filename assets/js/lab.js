@@ -1,4 +1,4 @@
-/* Risk lab — four questions about risk, answered from the daily S&P 500 history in the browser.
+/* Risk lab — five questions about risk, answered from the daily S&P 500 history in the browser.
    Reads the same series as the chart (market.js publishes it as window.JB.history).
    Price only: no dividends, no inflation adjustment. */
 (() => {
@@ -6,6 +6,11 @@
   const grid = document.getElementById('lab-grid');
   if (!grid) return;
   const $ = (id) => document.getElementById(id);
+  if (!window.RiskMath) { // a cached page can pair this script with an older risk-math.js
+    const w = $('lab-wait');
+    if (w) w.textContent = 'The risk lab could not load its calculations. Try reloading the page.';
+    return;
+  }
   const DAY = 86_400_000;
   const MIN = '−';
 
@@ -17,9 +22,11 @@
   const money = (v) => `$${nf(0).format(Math.round(v))}`;
   const UTC = { timeZone: 'UTC' };
   const fDay = new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric', month: 'short', day: 'numeric' });
+  const fShort = new Intl.DateTimeFormat('en-US', { ...UTC, month: 'short', day: 'numeric' });
   const fMonth = new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric', month: 'short' });
   const fYear = new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric' });
   const day = (n) => fDay.format(n * DAY);
+  const dayShort = (n) => fShort.format(n * DAY);
   const month = (n) => fMonth.format(n * DAY);
   const year = (n) => fYear.format(n * DAY);
   function duration(days) {
@@ -31,7 +38,7 @@
   const NS = 'http://www.w3.org/2000/svg';
   const svg = (tag, attrs = {}) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
 
-  const { percentile, holding, drawdowns, bestDays, tails } = window.RiskMath;
+  const { percentile, holding, drawdowns, bestDays, tails, seasonality } = window.RiskMath;
 
   /* ---------- 01 · time in the market ---------- */
   let HOLD = [];
@@ -267,6 +274,197 @@
     $('lab-ft-take').textContent = `Daily moves are small — a standard deviation of ${nf(2).format(T.sd)}% — but the extremes are far more common than a bell curve allows. A fall or jump of 4σ (${nf(1).format(4 * T.sd)}%) should turn up about once in ${nf(0).format(T.years / b4.expected)} years. It has happened ${nf(0).format(b4.observed)} times in ${nf(0).format(T.years)}. Risk models that assume normality understate exactly the days that matter.`;
   }
 
+  /* ---------- 05 · seasonality ---------- */
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const EDGES = [-6, -3, -1, 0, 1, 3, 6]; // colour steps in %; four per side, so 0 sits between the two palest
+  const bin = (r) => { const v = r * 100; let b = 0; while (b < EDGES.length && v >= EDGES[b]) b++; return b; };
+  let SEAS = null;
+  let sel = null; // { i: row, m: month }
+  let hm = null;  // geometry + overlay nodes of the rendered heat map
+  let seDays = null; // last trading day in the data, for the "to date" wording
+
+  function seasonRead(e) {
+    const mo = SEAS.months[e.m];
+    const read = $('lab-se-read');
+    read.replaceChildren();
+    read.append(el('strong', '', `${MON[e.m]} ${e.y}: ${pct(e.r * 100, 1)}`));
+    let note = '';
+    if (e === SEAS.worst) note = 'The worst month in the data. ';
+    else if (e === SEAS.bestM) note = 'The best month in the data. ';
+    if (e.partial) note += `This month is still in progress (to ${dayShort(seDays)}), so it is faded and left out of the averages. `;
+    else note += `The average ${MONTH[e.m]} since ${SEAS.y0} is ${pct(mo.mean * 100, 1)}; ${nf(0).format(mo.up * 100)}% of them were up. `;
+    read.append(' ', el('span', '', note.trim()));
+  }
+  function seasonSelect(i, m) {
+    const e = SEAS.grid[i] && SEAS.grid[i][m];
+    if (!e || !hm) return;
+    sel = { i, m };
+    hm.sel.setAttribute('x', hm.ml + m * hm.cw + 0.5);
+    hm.sel.setAttribute('y', hm.mt + i * hm.ch + 0.5);
+    hm.sel.setAttribute('width', hm.cw - 1);
+    hm.sel.setAttribute('height', hm.ch - 1);
+    hm.sel.style.display = '';
+    seasonRead(e);
+  }
+  function renderSeasonHeat() {
+    const host = $('lab-se-hm');
+    const rows = SEAS.grid.length;
+    const W = Math.max(260, Math.round(host.clientWidth));
+    const ml = 32, mt = 17, gap = 1.5;
+    const cw = (W - ml) / 12;
+    const ch = W < 420 ? 11.5 : 13.5;
+    const H = Math.ceil(mt + rows * ch);
+    const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, 'aria-hidden': 'true', focusable: 'false' });
+    for (let m = 0; m < 12; m++) {
+      const t = svg('text', { x: ml + (m + 0.5) * cw, y: 11, class: 'hm-axis', 'text-anchor': 'middle' });
+      t.textContent = W < 380 ? MON[m][0] : MON[m];
+      root.append(t);
+    }
+    SEAS.grid.forEach((row, i) => {
+      const yr = SEAS.y0 + i;
+      if (yr % 5 === 0) {
+        const t = svg('text', { x: ml - 7, y: mt + (i + 0.5) * ch + 3.5, class: 'hm-axis', 'text-anchor': 'end' });
+        t.textContent = yr;
+        root.append(t);
+      }
+      row.forEach((e, m) => {
+        if (!e) return;
+        root.append(svg('rect', { x: (ml + m * cw + gap / 2).toFixed(2), y: (mt + i * ch + gap / 2).toFixed(2), width: (cw - gap).toFixed(2), height: (ch - gap).toFixed(2), rx: 2, class: `hm hm${bin(e.r)}${e.partial ? ' part' : ''}` }));
+      });
+    });
+    const col = svg('rect', { class: 'hm-col', x: 0, y: mt - 1, width: cw, height: rows * ch + 1, rx: 3 });
+    col.style.display = 'none';
+    const selR = svg('rect', { class: 'hm-sel', rx: 3 });
+    selR.style.display = 'none';
+    root.append(col, selR);
+    host.replaceChildren(root);
+    hm = { W, ml, mt, cw, ch, rows, sel: selR, col };
+    if (sel) seasonSelect(sel.i, sel.m);
+  }
+  function wireSeasonHeat() {
+    const host = $('lab-se-hm');
+    const at = (e) => {
+      const r = host.getBoundingClientRect();
+      const x = (e.clientX - r.left) * (hm.W / r.width);
+      const y = (e.clientY - r.top) * (hm.W / r.width);
+      const m = Math.floor((x - hm.ml) / hm.cw), i = Math.floor((y - hm.mt) / hm.ch);
+      return m >= 0 && m < 12 && i >= 0 && i < hm.rows ? { i, m } : null;
+    };
+    const go = (e) => { const c = at(e); if (c && SEAS.grid[c.i][c.m]) seasonSelect(c.i, c.m); };
+    host.addEventListener('pointermove', go);
+    host.addEventListener('pointerdown', go);
+    host.addEventListener('keydown', (e) => {
+      // left/right walk through time (December wraps to the next January); up/down stay in the same month
+      const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -12, ArrowDown: 12 }[e.key];
+      const flat = (k) => (k >= 0 && k < SEAS.grid.length * 12 ? SEAS.grid[Math.floor(k / 12)][k % 12] : null);
+      if (step == null && e.key !== 'Home' && e.key !== 'End') return;
+      e.preventDefault();
+      const cur = sel ? sel.i * 12 + sel.m : 0;
+      let k = cur + (step || 0);
+      if (e.key === 'Home') { k = 0; while (k < SEAS.grid.length * 12 && !flat(k)) k++; }
+      if (e.key === 'End') { k = SEAS.grid.length * 12 - 1; while (k > 0 && !flat(k)) k--; }
+      if (flat(k)) seasonSelect(Math.floor(k / 12), k % 12);
+    });
+    host.addEventListener('focus', () => { if (!sel) seasonSelect(SEAS.worst.i, SEAS.worst.m); });
+  }
+  function renderSeasonMonths() {
+    const S = SEAS;
+    const list = $('lab-se-months');
+    list.replaceChildren();
+    const a = Math.floor(Math.min(0, ...S.months.map((x) => x.lo)) * 100), b = Math.ceil(Math.max(...S.months.map((x) => x.hi)) * 100);
+    const p = (v) => `${((v * 100 - a) / (b - a)) * 100}%`;
+    S.months.forEach((x) => {
+      const li = el('li', 'se-row');
+      li.dataset.m = x.m;
+      const sr = el('span', 'sr-only', `${MONTH[x.m]}: average ${pct(x.mean * 100, 1)}, 95% range ${pct(x.lo * 100, 1)} to ${pct(x.hi * 100, 1)}. Up in ${nf(0).format(x.up * 100)}% of ${x.n} years. Best ${pct(x.best.r * 100, 1)} (${x.best.y}), worst ${pct(x.worst.r * 100, 1)} (${x.worst.y}).`);
+      const name = el('span', 'se-m', MON[x.m]);
+      const tr = el('div', 'se-track');
+      const z = el('i', 'se-zero'); z.style.left = p(0);
+      const av = el('i', 'se-avg'); av.style.left = p(S.all.mean);
+      const bar = el('i', `se-bar ${x.mean >= 0 ? 'pos' : 'neg'}`);
+      bar.style.left = p(Math.min(0, x.mean)); bar.style.width = `${(Math.abs(x.mean) * 100 / (b - a)) * 100}%`;
+      const ci = el('i', 'se-ci'); ci.style.left = p(x.lo); ci.style.width = `${((x.hi - x.lo) * 100 / (b - a)) * 100}%`;
+      tr.append(z, av, bar, ci);
+      const val = el('span', 'se-val', pct(x.mean * 100, 1));
+      const up = el('span', 'se-up', `${nf(0).format(x.up * 100)}%`);
+      [name, tr, val, up].forEach((n) => n.setAttribute('aria-hidden', 'true'));
+      li.append(sr, name, tr, val, up);
+      li.addEventListener('pointerenter', () => { if (!hm) return; hm.col.setAttribute('x', hm.ml + x.m * hm.cw); hm.col.style.display = ''; li.classList.add('is-on'); });
+      li.addEventListener('pointerleave', () => { if (hm) hm.col.style.display = 'none'; li.classList.remove('is-on'); });
+      list.append(li);
+    });
+  }
+  function renderSeasonExtremes() {
+    const host = $('lab-se-ext');
+    host.replaceChildren();
+    const done = SEAS.monthly.filter((e) => !e.partial);
+    const mk = (title, rows) => {
+      const box = el('div');
+      box.append(el('p', 'label', title));
+      const ol = el('ol');
+      rows.forEach((e) => {
+        const li = el('li');
+        const sw = el('i'); sw.style.background = `var(--dv${bin(e.r)})`; sw.setAttribute('aria-hidden', 'true');
+        const t = el('time', '', `${MON[e.m]} ${e.y}`);
+        li.append(sw, t, el('b', '', pct(e.r * 100, 1)));
+        li.addEventListener('pointerenter', () => seasonSelect(e.y - SEAS.y0, e.m));
+        ol.append(li);
+      });
+      box.append(ol);
+      host.append(box);
+    };
+    mk('Five worst months', done.slice().sort((a, b) => a.r - b.r).slice(0, 5));
+    mk('Five best months', done.slice().sort((a, b) => b.r - a.r).slice(0, 5));
+  }
+  function renderSeasonScale() {
+    const host = $('lab-se-scale');
+    host.replaceChildren();
+    for (let k = 0; k < 8; k++) { const i = el('i'); i.style.background = `var(--dv${k})`; host.append(i); }
+    EDGES.forEach((v, k) => { const t = el('span', '', v === 0 ? '0%' : `${v > 0 ? '+' : MIN}${Math.abs(v)}%`); t.style.left = `${((k + 1) / 8) * 100}%`; host.append(t); });
+    host.append(el('span', 'se-cap', 'Monthly return'));
+  }
+  function renderSeasonTables() {
+    // table twin for assistive tech: every month of every year
+    const S = SEAS;
+    const tbl = el('table');
+    tbl.append(el('caption', '', 'S&P 500 monthly price returns by year and month'));
+    const head = tbl.createTHead().insertRow();
+    ['Year', ...MON].forEach((t) => { const th = el('th', '', t); th.scope = 'col'; head.append(th); });
+    const tb = tbl.createTBody();
+    S.grid.forEach((row, i) => {
+      const tr = tb.insertRow();
+      const th = el('th', '', String(S.y0 + i)); th.scope = 'row'; tr.append(th);
+      row.forEach((e) => { tr.insertCell().textContent = e ? pct(e.r * 100, 1) + (e.partial ? ' (month to date)' : '') : '—'; });
+    });
+    const clip = el('div', 'sr-only');
+    clip.append(tbl);
+    $('lab-se-months').after(clip);
+  }
+  function startSeasonality(d, c) {
+    SEAS = seasonality(d, c);
+    seDays = d[d.length - 1];
+    let w = null, b = null;
+    SEAS.grid.forEach((row, i) => row.forEach((e, m) => { if (!e || e.partial) return; e.i = i; if (!w || e.r < w.r) w = e; if (!b || e.r > b.r) b = e; }));
+    SEAS.worst = w; SEAS.bestM = b;
+    SEAS.last.i = SEAS.grid.length - 1;
+    const S = SEAS;
+    const byMean = S.months.slice().sort((x, y) => y.mean - x.mean);
+    const hi = byMean[0], lo = byMean[11];
+    const moe = (S.months.reduce((a, x) => a + 1.96 * x.se, 0) / 12) * 100;
+    const up = (x) => `${nf(0).format(x.up * 100)}%`;
+    $('lab-se-take').textContent = `Since ${S.y0}, the average month has returned ${pct(S.all.mean * 100, 2)} and ${nf(0).format(S.all.up * 100)}% of months were up. Calendar months do differ — ${MONTH[hi.m]} has averaged ${pct(hi.mean * 100, 1)} (up in ${up(hi)} of years) and ${MONTH[lo.m]} ${pct(lo.mean * 100, 1)} (up in ${up(lo)}). But each month has only about ${S.months[0].n} observations, so each average carries a margin of error of roughly ±${nf(1).format(moe)} points. ${S.exceed === 0 ? 'No month sits' : S.exceed === 1 ? 'Only one month sits' : `Only ${S.exceed} of the 12 months sit`} more than two standard errors from the all-month average, and with twelve months to choose from, about one would do that by luck alone.`;
+    const first = S.grid[0].findIndex((e) => e);
+    $('lab-se-foot').textContent = `Month-end to month-end closes, price only. ${MON[S.last.m]} ${S.last.y} (to ${dayShort(seDays)}) is shown faded and left out of the averages${first > 0 ? `; ${S.y0} starts in ${MON[first]} because the data begins on ${day(d[0])}` : ''}. Bars show each month's average, the thin line its 95% range (±1.96 standard errors), and the dashed tick the average of all months. A seasonal pattern that held in the past is not a forecast.`;
+    renderSeasonScale();
+    renderSeasonMonths();
+    renderSeasonHeat();
+    renderSeasonExtremes();
+    wireSeasonHeat();
+    renderSeasonTables();
+    seasonSelect(S.worst.i, S.worst.m);
+  }
+
   /* ---------- go ---------- */
   let started = false;
   function start() {
@@ -277,7 +475,7 @@
     HOLD = [1, 3, 5, 10, 20].map((y) => holding(d, c, y)).filter((h) => h.windows > 100);
     const eps = drawdowns(d, c);
     TAILS = tails(d, c);
-    window.JB.lab = { holding, drawdowns, bestDays, tails, results: { HOLD, eps, TAILS } };
+    window.JB.lab = { holding, drawdowns, bestDays, tails, seasonality, results: { HOLD, eps, TAILS } };
 
     $('lab-wait').hidden = true;
     grid.hidden = false; // show first: the charts measure their own width
@@ -292,10 +490,14 @@
     renderBestDays(d, c);
     renderTails();
     renderTailStats();
+    startSeasonality(d, c);
+    window.JB.lab.results.SEAS = SEAS;
 
     // charts that depend on width
     let raf = 0;
     new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { renderTails(); }); }).observe($('lab-ft'));
+    let hmW = $('lab-se-hm').clientWidth;
+    new ResizeObserver(() => { const w = $('lab-se-hm').clientWidth; if (w && Math.abs(w - hmW) > 1) { hmW = w; renderSeasonHeat(); } }).observe($('lab-se-hm'));
     let lastNarrow = $('lab-hold').clientWidth < 560;
     new ResizeObserver(() => { const nw = $('lab-hold').clientWidth < 560; if (nw !== lastNarrow) { lastNarrow = nw; renderHolding(); } }).observe($('lab-hold'));
   }

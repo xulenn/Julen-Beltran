@@ -1,0 +1,15 @@
+{
+  "name": "Julen Beltran — Finance & Business Management",
+  "short_name": "Julen Beltran",
+  "description": "Business Management student focused on finance, with a live S&P 500 chart and a risk lab built by hand.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "browser",
+  "background_color": "#f4f0e8",
+  "theme_color": "#1d1b18",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "assets/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

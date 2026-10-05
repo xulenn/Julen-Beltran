@@ -114,5 +114,44 @@
       return { N, mu, sd, kurtosis: m4 / (m2 * m2) - 3, beyond: [3, 4, 5].map(beyond), W, LO, B, counts, expected, worst: { r: x[wi], date: d[wi + 1] }, best: { r: x[bi], date: d[bi + 1] }, years: (d[d.length - 1] - d[0]) / 365.25 };
     }
 
-  return { percentile, firstGE, holding, drawdowns, bestDays, erfc, Phi, tails };
+
+    /** Month-end to month-end returns by calendar month. The first month has no earlier month-end to measure from and the
+     *  latest month may still be in progress, so neither enters the averages (the latest is still returned, flagged `partial`).
+     *  `exceed` counts calendar months whose average sits more than two standard errors from the all-month average. */
+    function seasonality(d, c) {
+      const keys = [], px = [];
+      for (let i = 0; i < d.length; i++) {
+        const t = new Date(d[i] * 86400000);
+        const k = t.getUTCFullYear() * 12 + t.getUTCMonth();
+        if (keys.length && keys[keys.length - 1] === k) px[px.length - 1] = c[i];
+        else { keys.push(k); px.push(c[i]); }
+      }
+      const monthly = [];
+      for (let j = 1; j < keys.length; j++) {
+        if (keys[j] - keys[j - 1] !== 1) continue; // a gap in the data is not a month
+        monthly.push({ y: Math.floor(keys[j] / 12), m: keys[j] % 12, r: px[j] / px[j - 1] - 1, partial: j === keys.length - 1 });
+      }
+      const done = monthly.filter((e) => !e.partial);
+      const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+      const all = { n: done.length, mean: mean(done.map((e) => e.r)), up: done.filter((e) => e.r > 0).length / done.length };
+      const months = [];
+      for (let m = 0; m < 12; m++) {
+        const x = done.filter((e) => e.m === m);
+        const r = x.map((e) => e.r);
+        const n = r.length, mu = mean(r);
+        const sd = n > 1 ? Math.sqrt(r.reduce((a, v) => a + (v - mu) ** 2, 0) / (n - 1)) : 0;
+        const se = sd / Math.sqrt(n);
+        const sorted = Float64Array.from(r).sort();
+        let bi = 0, wi = 0;
+        x.forEach((e, i) => { if (e.r > x[bi].r) bi = i; if (e.r < x[wi].r) wi = i; });
+        months.push({ m, n, mean: mu, median: percentile(sorted, 0.5), up: r.filter((v) => v > 0).length / n, sd, se, lo: mu - 1.96 * se, hi: mu + 1.96 * se, best: { r: x[bi].r, y: x[bi].y }, worst: { r: x[wi].r, y: x[wi].y } });
+      }
+      const y0 = monthly[0].y, y1 = monthly[monthly.length - 1].y;
+      const grid = [];
+      for (let y = y0; y <= y1; y++) grid.push(new Array(12).fill(null));
+      monthly.forEach((e) => { grid[e.y - y0][e.m] = e; });
+      return { y0, y1, grid, monthly, months, all, exceed: months.filter((x) => Math.abs(x.mean - all.mean) > 2 * x.se).length, last: monthly[monthly.length - 1] };
+    }
+
+  return { percentile, firstGE, holding, drawdowns, bestDays, erfc, Phi, tails, seasonality };
 });
