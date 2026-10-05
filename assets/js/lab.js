@@ -6,9 +6,14 @@
   const grid = document.getElementById('lab-grid');
   if (!grid) return;
   const $ = (id) => document.getElementById(id);
+  // i18n (assets/js/i18n.js): t() maps the English text to the page language; LOCALE/PC drive number and date formats
+  const t = window.JB?.t || ((s, v) => (v ? s.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m)) : s));
+  const LANG = window.JB?.lang || 'en';
+  const LOCALE = window.JB?.locale || 'en-US';
+  const PC = window.JB?.PC || '%';
   if (!window.RiskMath) { // a cached page can pair this script with an older risk-math.js
     const w = $('lab-wait');
-    if (w) w.textContent = 'The risk lab could not load its calculations. Try reloading the page.';
+    if (w) w.textContent = t('The risk lab could not load its calculations. Try reloading the page.');
     return;
   }
   const DAY = 86_400_000;
@@ -16,23 +21,24 @@
 
   /* ---------- formatting ---------- */
   const nfc = {};
-  const nf = (d) => (nfc[d] ||= new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const nf = (d) => (nfc[d] ||= new Intl.NumberFormat(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: LANG === 'es' ? 'always' : true }));
   const sgn = (v) => (v > 0 ? '+' : v < 0 ? MIN : '');
-  const pct = (v, d = 1) => `${sgn(Number(v.toFixed(d)))}${nf(d).format(Math.abs(v))}%`;
-  const money = (v) => `$${nf(0).format(Math.round(v))}`;
+  const pct = (v, d = 1) => `${sgn(Number(v.toFixed(d)))}${nf(d).format(Math.abs(v))}${PC}`;
+  const plain = (v, d = 0) => `${nf(d).format(v)}${PC}`; // unsigned percentage
+  const money = (v) => (LANG === 'es' ? `${nf(0).format(Math.round(v))}\u00a0$` : `$${nf(0).format(Math.round(v))}`);
   const UTC = { timeZone: 'UTC' };
-  const fDay = new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric', month: 'short', day: 'numeric' });
-  const fShort = new Intl.DateTimeFormat('en-US', { ...UTC, month: 'short', day: 'numeric' });
-  const fMonth = new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric', month: 'short' });
-  const fYear = new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric' });
+  const fDay = new Intl.DateTimeFormat(LOCALE, { ...UTC, year: 'numeric', month: 'short', day: 'numeric' });
+  const fShort = new Intl.DateTimeFormat(LOCALE, { ...UTC, month: 'short', day: 'numeric' });
+  const fMonth = new Intl.DateTimeFormat(LOCALE, { ...UTC, year: 'numeric', month: 'short' });
+  const fYear = new Intl.DateTimeFormat(LOCALE, { ...UTC, year: 'numeric' });
   const day = (n) => fDay.format(n * DAY);
   const dayShort = (n) => fShort.format(n * DAY);
   const month = (n) => fMonth.format(n * DAY);
   const year = (n) => fYear.format(n * DAY);
   function duration(days) {
-    if (days < 60) return `${days} days`;
-    if (days < 730) return `${Math.round(days / 30.44)} months`;
-    return `${nf(1).format(days / 365.25)} years`;
+    if (days < 60) return days === 1 ? t('1 day') : t('{n} days', { n: days });
+    if (days < 730) return t('{n} months', { n: Math.round(days / 30.44) });
+    return t('{n} years', { n: nf(1).format(days / 365.25) });
   }
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const NS = 'http://www.w3.org/2000/svg';
@@ -42,6 +48,7 @@
 
   /* ---------- 01 · time in the market ---------- */
   let HOLD = [];
+  const yearsLabel = (n) => (n === 1 ? t('1 year') : t('{n} years', { n }));
   function renderHolding(D) {
     const host = $('lab-hold');
     host.replaceChildren();
@@ -55,10 +62,10 @@
     const frac = (a) => a * 100;
 
     const head = el('div', 'rp-head');
-    head.append(el('span'), el('span'), el('span', 'rp-h-loss', 'Lost money'));
+    head.append(el('span'), el('span'), el('span', 'rp-h-loss', t('Lost money')));
     const axis = el('div', 'rp-axis');
     axis.setAttribute('aria-hidden', 'true');
-    ticks.forEach((t) => { const s = el('span', '', `${t > 0 ? '+' : t < 0 ? MIN : ''}${Math.abs(t)}%`); s.style.left = at(t); axis.append(s); });
+    ticks.forEach((v) => { const s = el('span', '', `${v > 0 ? '+' : v < 0 ? MIN : ''}${Math.abs(v)}${PC}`); s.style.left = at(v); axis.append(s); });
     head.replaceChild(axis, head.children[1]);
     host.append(head);
 
@@ -67,15 +74,15 @@
       row.tabIndex = 0;
       row.dataset.years = h.years;
       row.setAttribute('aria-label', readoutText(h));
-      row.append(el('span', 'rp-label', `${h.years} ${h.years === 1 ? 'year' : 'years'}`));
+      row.append(el('span', 'rp-label', yearsLabel(h.years)));
       const track = el('div', 'rp-track');
-      ticks.forEach((t) => { const g = el('i', t === 0 ? 'rp-g zero' : 'rp-g'); g.style.left = at(t); track.append(g); });
+      ticks.forEach((v) => { const g = el('i', v === 0 ? 'rp-g zero' : 'rp-g'); g.style.left = at(v); track.append(g); });
       const wh = el('i', 'rp-whisk'); wh.style.left = at(frac(h.worst)); wh.style.width = `${((frac(h.best) - frac(h.worst)) / (hi - lo)) * 100}%`;
       const bx = el('i', 'rp-box'); bx.style.left = at(frac(h.p10)); bx.style.width = `${((frac(h.p90) - frac(h.p10)) / (hi - lo)) * 100}%`;
       const md = el('i', 'rp-med'); md.style.left = at(frac(h.median));
       track.append(wh, bx, md);
-      const loss = el('span', 'rp-loss', h.lossShare === 0 ? 'Never' : `${nf(h.lossShare < 0.1 ? 1 : 0).format(h.lossShare * 100)}%`);
-      loss.append(el('small', '', h.lossShare === 0 ? 'in any window' : 'of windows'));
+      const loss = el('span', 'rp-loss', h.lossShare === 0 ? t('Never') : plain(h.lossShare * 100, h.lossShare < 0.1 ? 1 : 0));
+      loss.append(el('small', '', h.lossShare === 0 ? t('in any window') : t('of windows')));
       row.append(track, loss);
       host.append(row);
       return row;
@@ -95,20 +102,24 @@
 
     // table twin for assistive tech
     const tbl = el('table');
-    tbl.append(el('caption', '', 'Holding-period outcomes for the S&P 500 (annualized, price only)'));
+    tbl.append(el('caption', '', t('Holding-period outcomes for the S&P 500 (annualized, price only)')));
     const thead = tbl.createTHead().insertRow();
-    ['Holding period', 'Windows', 'Lost money', 'Median a year', '10th percentile', '90th percentile', 'Worst a year', 'Best a year'].forEach((t) => { const th = el('th', '', t); th.scope = 'col'; thead.append(th); });
+    [t('Holding period'), t('Windows'), t('Lost money'), t('Median a year'), t('10th percentile'), t('90th percentile'), t('Worst a year'), t('Best a year')].forEach((label) => { const th = el('th', '', label); th.scope = 'col'; thead.append(th); });
     const tb = tbl.createTBody();
     HOLD.forEach((h) => {
       const tr = tb.insertRow();
-      [`${h.years} years`, nf(0).format(h.windows), `${nf(1).format(h.lossShare * 100)}%`, pct(h.median * 100), pct(h.p10 * 100), pct(h.p90 * 100), pct(h.worst * 100), pct(h.best * 100)].forEach((t) => { tr.insertCell().textContent = t; });
+      [yearsLabel(h.years), nf(0).format(h.windows), plain(h.lossShare * 100, 1), pct(h.median * 100), pct(h.p10 * 100), pct(h.p90 * 100), pct(h.worst * 100), pct(h.best * 100)].forEach((cell) => { tr.insertCell().textContent = cell; });
     });
     const clip = el('div', 'sr-only'); // a bare <table> ignores the 1px sizing trick, so clip it in a wrapper
     clip.append(tbl);
     host.append(clip);
   }
   function readoutText(h) {
-    return `${h.years} ${h.years === 1 ? 'year' : 'years'}: ${nf(0).format(h.windows)} possible start dates. Median ${pct(h.median * 100)} a year; the middle 80% ended between ${pct(h.p10 * 100)} and ${pct(h.p90 * 100)} a year. Worst ${pct(h.worst * 100)} a year (starting ${day(h.worstStart)}), best ${pct(h.best * 100)} a year (starting ${day(h.bestStart)}). ${h.lossShare === 0 ? 'None of these windows lost money.' : `${nf(1).format(h.lossShare * 100)}% of them lost money.`}`;
+    return t('{label}: {windows} possible start dates. Median {median} a year; the middle 80% ended between {p10} and {p90} a year. Worst {worst} a year (starting {wd}), best {best} a year (starting {bd}). {loss}', {
+      label: yearsLabel(h.years), windows: nf(0).format(h.windows), median: pct(h.median * 100), p10: pct(h.p10 * 100), p90: pct(h.p90 * 100),
+      worst: pct(h.worst * 100), wd: day(h.worstStart), best: pct(h.best * 100), bd: day(h.bestStart),
+      loss: h.lossShare === 0 ? t('None of these windows lost money.') : t('{p} of them lost money.', { p: plain(h.lossShare * 100, 1) }),
+    });
   }
 
   /* ---------- 02 · drawdowns ---------- */
@@ -127,17 +138,20 @@
       c2.textContent = `${month(e.peak)} → ${month(e.trough)}`;
       c2.title = `${day(e.peak)} (${nf(2).format(e.peakPx)}) → ${day(e.trough)} (${nf(2).format(e.troughPx)})`;
       const c3 = tr.insertCell(); c3.className = 'c-down'; c3.textContent = duration(e.trough - e.peak);
-      const c4 = tr.insertCell(); c4.textContent = e.recovered ? duration(e.recovered - e.trough) : 'Still recovering';
+      const c4 = tr.insertCell(); c4.textContent = e.recovered ? duration(e.recovered - e.trough) : t('Still recovering');
     });
     const years = (lastDay - firstDay) / 365.25;
     const rec = eps.filter((e) => e.recovered).map((e) => e.recovered - e.trough).sort((a, b) => a - b);
     const med = rec.length ? percentile(Float64Array.from(rec), 0.5) : null;
     const bears = eps.filter((e) => e.depth <= -0.2).length;
-    $('lab-dd-take').textContent = `Since ${year(firstDay)} the index has fallen 10% or more from a peak ${eps.length} times — about once every ${nf(1).format(years / eps.length)} years — and ${bears} of those became bear markets (−20% or worse). ${med != null ? `The typical decline took ${duration(Math.round(med))} to recover from the low.` : ''}`;
+    $('lab-dd-take').textContent = [
+      t('Since {year} the index has fallen 10% or more from a peak {n} times — about once every {every} years — and {bears} of those became bear markets (−20% or worse).', { year: year(firstDay), n: eps.length, every: nf(1).format(years / eps.length), bears }),
+      med != null ? t('The typical decline took {d} to recover from the low.', { d: duration(Math.round(med)) }) : '',
+    ].join(' ');
   }
 
   /* ---------- 03 · missing the best days ---------- */
-  const PERIODS = [{ id: '10', label: '10Y', years: 10 }, { id: '20', label: '20Y', years: 20 }, { id: '30', label: '30Y', years: 30 }, { id: 'all', label: 'All', years: null }];
+  const PERIODS = [{ id: '10', label: t('10Y'), years: 10 }, { id: '20', label: t('20Y'), years: 20 }, { id: '30', label: t('30Y'), years: 30 }, { id: 'all', label: t('All'), years: null }];
   let bdPeriod = '20';
   function renderBestDays(d, c) {
     const P = PERIODS.find((p) => p.id === bdPeriod);
@@ -147,7 +161,7 @@
     list.replaceChildren();
     R.values.forEach((row) => {
       const li = el('li', row.N === 0 ? 'full' : '');
-      li.append(el('span', 'bd-name', row.N === 0 ? 'Fully invested' : `Missed the ${row.N} best days`));
+      li.append(el('span', 'bd-name', row.N === 0 ? t('Fully invested') : t('Missed the {n} best days', { n: row.N })));
       const tr = el('span', 'bd-track');
       const f = el('i', 'bd-fill'); f.style.width = `${(row.v / full) * 100}%`;
       tr.append(f);
@@ -157,8 +171,11 @@
       list.append(li);
     });
     const v10 = R.values.find((x) => x.N === 10).v;
-    $('lab-bd-take').textContent = `Over the ${P.years ? `last ${P.years} years` : `whole period since ${year(R.start)}`}, ${money(10000)} grew to ${money(full)}. Sit out just the 10 best days and it ends at ${money(v10)} — ${pct((v10 / full - 1) * 100, 0)}. ${R.clustered} of those 10 best days landed within 15 trading days of one of the 10 worst, which is why you can't dodge the bad days and keep the good ones.`;
-    $('lab-bd-foot').textContent = `${nf(0).format(R.days)} trading days from ${day(R.start)}; price index only, so dividends are excluded and every figure is lower than a total-return version would be.`;
+    $('lab-bd-take').textContent = t("Over the {period}, {start} grew to {full}. Sit out just the 10 best days and it ends at {v10} — {delta}. {k} of those 10 best days landed within 15 trading days of one of the 10 worst, which is why you can't dodge the bad days and keep the good ones.", {
+      period: P.years ? t('last {n} years', { n: P.years }) : t('whole period since {year}', { year: year(R.start) }),
+      start: money(10000), full: money(full), v10: money(v10), delta: pct((v10 / full - 1) * 100, 0), k: R.clustered,
+    });
+    $('lab-bd-foot').textContent = t('{n} trading days from {date}; price index only, so dividends are excluded and every figure is lower than a total-return version would be.', { n: nf(0).format(R.days), date: day(R.start) });
     document.querySelectorAll('#lab-bd-range button').forEach((b) => { b.setAttribute('aria-checked', String(b.dataset.id === bdPeriod)); b.tabIndex = b.dataset.id === bdPeriod ? 0 : -1; });
   }
   function buildPeriodSwitch(d, c) {
@@ -206,11 +223,11 @@
     }
     [-8, -4, 0, 4, 8].forEach((v) => {
       const t = svg('text', { x: sx(v), y: H - 10, class: 'ft-axis', 'text-anchor': 'middle' });
-      t.textContent = `${v > 0 ? '+' : v < 0 ? MIN : ''}${Math.abs(v)}%`;
+      t.textContent = `${v > 0 ? '+' : v < 0 ? MIN : ''}${Math.abs(v)}${PC}`;
       root.append(t);
     });
     const yl = svg('text', { x: 0, y: 11, class: 'ft-axis' });
-    yl.textContent = 'days (log scale)';
+    yl.textContent = t('days (log scale)');
     root.append(yl);
 
     // bars (columns: 4px rounded data end, square at the baseline, 2px gap)
@@ -223,7 +240,8 @@
       const h = Math.max(1, base - y);
       const r = Math.min(3, h, bw / 2);
       const lo = T.LO + b * T.W;
-      const label = `${b === 0 ? `${pct(lo + T.W, 1).replace('+', '')} or lower` : b === T.B - 1 ? `${pct(lo, 1)} or higher` : `${pct(lo, 1)} to ${pct(lo + T.W, 1)}`}: ${nf(0).format(cnt)} days (a bell curve predicts ${nf(cnt < 20 ? 1 : 0).format(T.expected[b])})`;
+      const range = b === 0 ? t('{a} or lower', { a: pct(lo + T.W, 1).replace('+', '') }) : b === T.B - 1 ? t('{a} or higher', { a: pct(lo, 1) }) : t('{a} to {b}', { a: pct(lo, 1), b: pct(lo + T.W, 1) });
+      const label = t('{range}: {n} days (a bell curve predicts {x})', { range, n: nf(0).format(cnt), x: nf(cnt < 20 ? 1 : 0).format(T.expected[b]) });
       const bar = svg('path', { d: `M${x},${base} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${base} Z`, class: 'ft-bar' });
       const tt = svg('title');
       tt.textContent = label;
@@ -268,15 +286,19 @@
       w.append(dd);
       dl.append(w);
     };
-    T.beyond.forEach((b) => tile(`Beyond ${b.k}σ (±${nf(1).format(b.k * T.sd)}%)`, `${nf(0).format(b.observed)} days`, `a bell curve predicts ${b.expected < 1 ? nf(2).format(b.expected) : nf(0).format(b.expected)}`));
-    tile('Worst day', pct(T.worst.r, 1), day(T.worst.date));
+    T.beyond.forEach((b) => tile(t('Beyond {k}σ (±{pct})', { k: b.k, pct: plain(b.k * T.sd, 1) }), t('{n} days', { n: nf(0).format(b.observed) }), t('a bell curve predicts {x}', { x: b.expected < 1 ? nf(2).format(b.expected) : nf(0).format(b.expected) })));
+    tile(t('Worst day'), pct(T.worst.r, 1), day(T.worst.date));
     const b4 = T.beyond[1];
-    $('lab-ft-take').textContent = `Daily moves are small — a standard deviation of ${nf(2).format(T.sd)}% — but the extremes are far more common than a bell curve allows. A fall or jump of 4σ (${nf(1).format(4 * T.sd)}%) should turn up about once in ${nf(0).format(T.years / b4.expected)} years. It has happened ${nf(0).format(b4.observed)} times in ${nf(0).format(T.years)}. Risk models that assume normality understate exactly the days that matter.`;
+    $('lab-ft-take').textContent = t('Daily moves are small — a standard deviation of {sd} — but the extremes are far more common than a bell curve allows. A fall or jump of 4σ ({s4}) should turn up about once in {every} years. It has happened {n} times in {years} years. Risk models that assume normality understate exactly the days that matter.', {
+      sd: plain(T.sd, 2), s4: plain(4 * T.sd, 1), every: nf(0).format(T.years / b4.expected), n: nf(0).format(b4.observed), years: nf(0).format(T.years),
+    });
   }
 
   /* ---------- 05 · seasonality ---------- */
-  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+  const monthNames = (style) => Array.from({ length: 12 }, (_, m) => new Intl.DateTimeFormat(LOCALE, { ...UTC, month: style }).format(Date.UTC(2001, m, 15)));
+  const MON = monthNames('short').map(cap).map((x) => x.replace(/\.$/, '')); // Jan … Dec / Ene … Dic
+  const MONTH = monthNames('long').map((x) => (LANG === 'es' ? x : cap(x))); // Spanish month names stay lower-case inside a sentence
   const EDGES = [-6, -3, -1, 0, 1, 3, 6]; // colour steps in %; four per side, so 0 sits between the two palest
   const bin = (r) => { const v = r * 100; let b = 0; while (b < EDGES.length && v >= EDGES[b]) b++; return b; };
   let SEAS = null;
@@ -290,10 +312,10 @@
     read.replaceChildren();
     read.append(el('strong', '', `${MON[e.m]} ${e.y}: ${pct(e.r * 100, 1)}`));
     let note = '';
-    if (e === SEAS.worst) note = 'The worst month in the data. ';
-    else if (e === SEAS.bestM) note = 'The best month in the data. ';
-    if (e.partial) note += `This month is still in progress (to ${dayShort(seDays)}), so it is faded and left out of the averages. `;
-    else note += `The average ${MONTH[e.m]} since ${SEAS.y0} is ${pct(mo.mean * 100, 1)}; ${nf(0).format(mo.up * 100)}% of them were up. `;
+    if (e === SEAS.worst) note = t('The worst month in the data.') + ' ';
+    else if (e === SEAS.bestM) note = t('The best month in the data.') + ' ';
+    if (e.partial) note += t('This month is still in progress (to {date}), so it is faded and left out of the averages.', { date: dayShort(seDays) }) + ' ';
+    else note += t('The average {month} since {y0} is {mean}; {p} of them were up.', { month: MONTH[e.m], y0: SEAS.y0, mean: pct(mo.mean * 100, 1), p: plain(mo.up * 100) }) + ' ';
     read.append(' ', el('span', '', note.trim()));
   }
   function seasonSelect(i, m) {
@@ -377,7 +399,10 @@
     S.months.forEach((x) => {
       const li = el('li', 'se-row');
       li.dataset.m = x.m;
-      const sr = el('span', 'sr-only', `${MONTH[x.m]}: average ${pct(x.mean * 100, 1)}, 95% range ${pct(x.lo * 100, 1)} to ${pct(x.hi * 100, 1)}. Up in ${nf(0).format(x.up * 100)}% of ${x.n} years. Best ${pct(x.best.r * 100, 1)} (${x.best.y}), worst ${pct(x.worst.r * 100, 1)} (${x.worst.y}).`);
+      const sr = el('span', 'sr-only', t('{month}: average {mean}, 95% range {lo} to {hi}. Up in {p} of {n} years. Best {best} ({by}), worst {worst} ({wy}).', {
+        month: cap(MONTH[x.m]), mean: pct(x.mean * 100, 1), lo: pct(x.lo * 100, 1), hi: pct(x.hi * 100, 1), p: plain(x.up * 100), n: x.n,
+        best: pct(x.best.r * 100, 1), by: x.best.y, worst: pct(x.worst.r * 100, 1), wy: x.worst.y,
+      }));
       const name = el('span', 'se-m', MON[x.m]);
       const tr = el('div', 'se-track');
       const z = el('i', 'se-zero'); z.style.left = p(0);
@@ -387,7 +412,7 @@
       const ci = el('i', 'se-ci'); ci.style.left = p(x.lo); ci.style.width = `${((x.hi - x.lo) * 100 / (b - a)) * 100}%`;
       tr.append(z, av, bar, ci);
       const val = el('span', 'se-val', pct(x.mean * 100, 1));
-      const up = el('span', 'se-up', `${nf(0).format(x.up * 100)}%`);
+      const up = el('span', 'se-up', plain(x.up * 100));
       [name, tr, val, up].forEach((n) => n.setAttribute('aria-hidden', 'true'));
       li.append(sr, name, tr, val, up);
       li.addEventListener('pointerenter', () => { if (!hm) return; hm.col.setAttribute('x', hm.ml + x.m * hm.cw); hm.col.style.display = ''; li.classList.add('is-on'); });
@@ -414,28 +439,28 @@
       box.append(ol);
       host.append(box);
     };
-    mk('Five worst months', done.slice().sort((a, b) => a.r - b.r).slice(0, 5));
-    mk('Five best months', done.slice().sort((a, b) => b.r - a.r).slice(0, 5));
+    mk(t('Five worst months'), done.slice().sort((a, b) => a.r - b.r).slice(0, 5));
+    mk(t('Five best months'), done.slice().sort((a, b) => b.r - a.r).slice(0, 5));
   }
   function renderSeasonScale() {
     const host = $('lab-se-scale');
     host.replaceChildren();
     for (let k = 0; k < 8; k++) { const i = el('i'); i.style.background = `var(--dv${k})`; host.append(i); }
-    EDGES.forEach((v, k) => { const t = el('span', '', v === 0 ? '0%' : `${v > 0 ? '+' : MIN}${Math.abs(v)}%`); t.style.left = `${((k + 1) / 8) * 100}%`; host.append(t); });
-    host.append(el('span', 'se-cap', 'Monthly return'));
+    EDGES.forEach((v, k) => { const tick = el('span', '', v === 0 ? `0${PC}` : `${v > 0 ? '+' : MIN}${Math.abs(v)}${PC}`); tick.style.left = `${((k + 1) / 8) * 100}%`; host.append(tick); });
+    host.append(el('span', 'se-cap', t('Monthly return')));
   }
   function renderSeasonTables() {
     // table twin for assistive tech: every month of every year
     const S = SEAS;
     const tbl = el('table');
-    tbl.append(el('caption', '', 'S&P 500 monthly price returns by year and month'));
+    tbl.append(el('caption', '', t('S&P 500 monthly price returns by year and month')));
     const head = tbl.createTHead().insertRow();
-    ['Year', ...MON].forEach((t) => { const th = el('th', '', t); th.scope = 'col'; head.append(th); });
+    [t('Year'), ...MON].forEach((label) => { const th = el('th', '', label); th.scope = 'col'; head.append(th); });
     const tb = tbl.createTBody();
     S.grid.forEach((row, i) => {
       const tr = tb.insertRow();
       const th = el('th', '', String(S.y0 + i)); th.scope = 'row'; tr.append(th);
-      row.forEach((e) => { tr.insertCell().textContent = e ? pct(e.r * 100, 1) + (e.partial ? ' (month to date)' : '') : '—'; });
+      row.forEach((e) => { tr.insertCell().textContent = e ? pct(e.r * 100, 1) + (e.partial ? t(' (month to date)') : '') : '—'; });
     });
     const clip = el('div', 'sr-only');
     clip.append(tbl);
@@ -452,10 +477,16 @@
     const byMean = S.months.slice().sort((x, y) => y.mean - x.mean);
     const hi = byMean[0], lo = byMean[11];
     const moe = (S.months.reduce((a, x) => a + 1.96 * x.se, 0) / 12) * 100;
-    const up = (x) => `${nf(0).format(x.up * 100)}%`;
-    $('lab-se-take').textContent = `Since ${S.y0}, the average month has returned ${pct(S.all.mean * 100, 2)} and ${nf(0).format(S.all.up * 100)}% of months were up. Calendar months do differ — ${MONTH[hi.m]} has averaged ${pct(hi.mean * 100, 1)} (up in ${up(hi)} of years) and ${MONTH[lo.m]} ${pct(lo.mean * 100, 1)} (up in ${up(lo)}). But each month has only about ${S.months[0].n} observations, so each average carries a margin of error of roughly ±${nf(1).format(moe)} points. ${S.exceed === 0 ? 'No month sits' : S.exceed === 1 ? 'Only one month sits' : `Only ${S.exceed} of the 12 months sit`} more than two standard errors from the all-month average, and with twelve months to choose from, about one would do that by luck alone.`;
+    const up = (x) => plain(x.up * 100);
+    const edge = S.exceed === 0 ? t('No month sits more than two standard errors from the all-month average, and with twelve months to choose from, about one would do that by luck alone.')
+      : S.exceed === 1 ? t('Only one month sits more than two standard errors from the all-month average, and with twelve months to choose from, about one would do that by luck alone.')
+      : t('Only {n} of the 12 months sit more than two standard errors from the all-month average, and with twelve months to choose from, about one would do that by luck alone.', { n: S.exceed });
+    $('lab-se-take').textContent = `${t('Since {y0}, the average month has returned {mean} and {up} of months were up. Calendar months do differ — {hi} has averaged {himean} (up in {hiup} of years) and {lo} {lomean} (up in {loup}). But each month has only about {n} observations, so each average carries a margin of error of roughly ±{moe} points.', {
+      y0: S.y0, mean: pct(S.all.mean * 100, 2), up: plain(S.all.up * 100), hi: MONTH[hi.m], himean: pct(hi.mean * 100, 1), hiup: up(hi), lo: MONTH[lo.m], lomean: pct(lo.mean * 100, 1), loup: up(lo), n: S.months[0].n, moe: nf(1).format(moe),
+    })} ${edge}`;
     const first = S.grid[0].findIndex((e) => e);
-    $('lab-se-foot').textContent = `Month-end to month-end closes, price only. ${MON[S.last.m]} ${S.last.y} (to ${dayShort(seDays)}) is shown faded and left out of the averages${first > 0 ? `; ${S.y0} starts in ${MON[first]} because the data begins on ${day(d[0])}` : ''}. Bars show each month's average, the thin line its 95% range (±1.96 standard errors), and the dashed tick the average of all months. A seasonal pattern that held in the past is not a forecast.`;
+    const extra = first > 0 ? t('; {y0} starts in {mon} because the data begins on {date}', { y0: S.y0, mon: MON[first], date: day(d[0]) }) : '';
+    $('lab-se-foot').textContent = t("Month-end to month-end closes, price only. {mon} {y} (to {to}) is shown faded and left out of the averages{extra}. Bars show each month's average, the thin line its 95% range (±1.96 standard errors), and the dashed tick the average of all months. A seasonal pattern that held in the past is not a forecast.", { mon: MON[S.last.m], y: S.last.y, to: dayShort(seDays), extra });
     renderSeasonScale();
     renderSeasonMonths();
     renderSeasonHeat();
@@ -479,12 +510,16 @@
 
     $('lab-wait').hidden = true;
     grid.hidden = false; // show first: the charts measure their own width
-    $('lab-span').textContent = `${nf(0).format(d.length)} trading days since ${year(d[0])}`;
+    $('lab-span').textContent = t('{n} trading days since {year}', { n: nf(0).format(d.length), year: year(d[0]) });
     renderHolding();
     const h1 = HOLD[0], hL = HOLD[HOLD.length - 1];
     const h5 = HOLD.find((h) => h.years === 5), h3 = HOLD.find((h) => h.years === 3);
-    $('lab-hold-take').textContent = `Since ${year(d[0])}, ${nf(0).format(h1.lossShare * 100)}% of 1-year windows lost money. Stretch the holding period to ${hL.years} years and ${hL.lossShare === 0 ? 'none ever did' : `only ${nf(0).format(hL.lossShare * 100)}% did`} — the worst ${hL.years}-year stretch still returned ${pct(hL.worst * 100)} a year (it started at the ${month(hL.worstStart)} peak). The median stays near ${nf(0).format(HOLD.find((h) => h.years === 10).median * 100)}% a year throughout; what time buys you is a narrower range of outcomes.`;
-    $('lab-hold-foot').textContent = `Every possible start date is a window, so windows overlap heavily and there are far fewer independent observations than the counts suggest${h5 && h3 && h5.lossShare > h3.lossShare ? ` — which is how the 5-year loss rate (${nf(0).format(h5.lossShare * 100)}%) can exceed the 3-year one (${nf(0).format(h3.lossShare * 100)}%)` : ''}. Past outcomes don't guarantee future ones.`;
+    $('lab-hold-take').textContent = t('Since {year}, {p1} of 1-year windows lost money. Stretch the holding period to {years} years and {tail} — the worst {years}-year stretch still returned {worst} a year (it started at the {peak} peak). The median stays near {med} a year throughout; what time buys you is a narrower range of outcomes.', {
+      year: year(d[0]), p1: plain(h1.lossShare * 100), years: hL.years, tail: hL.lossShare === 0 ? t('none ever did') : t('only {p} did', { p: plain(hL.lossShare * 100) }),
+      worst: pct(hL.worst * 100), peak: month(hL.worstStart), med: plain(HOLD.find((h) => h.years === 10).median * 100),
+    });
+    const overlap = h5 && h3 && h5.lossShare > h3.lossShare ? t(' — which is how the 5-year loss rate ({p5}) can exceed the 3-year one ({p3})', { p5: plain(h5.lossShare * 100), p3: plain(h3.lossShare * 100) }) : '';
+    $('lab-hold-foot').textContent = t("Every possible start date is a window, so windows overlap heavily and there are far fewer independent observations than the counts suggest{extra}. Past outcomes don't guarantee future ones.", { extra: overlap });
     renderDrawdowns(null, eps, d[0], d[d.length - 1]);
     buildPeriodSwitch(d, c);
     renderBestDays(d, c);
@@ -505,5 +540,5 @@
   const startWhenNear = () => { const near = window.JB && window.JB.whenNear; const host = document.getElementById('lab'); if (near && host) near(host, start); else start(); };
   if (window.JB && window.JB.history) startWhenNear();
   document.addEventListener('jb:history', startWhenNear, { once: true });
-  document.addEventListener('jb:market-error', () => { if (!started) $('lab-wait').textContent = "The risk lab needs the daily market history, which couldn't be loaded right now. The rest of the page works fine without it."; });
+  document.addEventListener('jb:market-error', () => { if (!started) $('lab-wait').textContent = t("The risk lab needs the daily market history, which couldn't be loaded right now. The rest of the page works fine without it."); });
 })();

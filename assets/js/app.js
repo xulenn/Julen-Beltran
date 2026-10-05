@@ -7,6 +7,9 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const EMAIL = 'julenbeltranperez@gmail.com';
+  const t = window.JB?.t || ((s, v) => (v ? s.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m)) : s));
+  const ROOT = window.JB?.root || '';
+  const LANG = window.JB?.lang || 'en';
   root.classList.add('ready'); // tells the CSS fallback that JS booted (see .js:not(.ready) .reveal)
 
   /* ---------- toast ---------- */
@@ -18,7 +21,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
   }
-  window.JB = { toast, reduced };
+  window.JB = Object.assign(window.JB || {}, { toast, reduced });
 
   /* ---------- theme ---------- */
   const themeBtn = $('#theme-toggle');
@@ -30,8 +33,18 @@
     const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
     try { localStorage.setItem('theme', next); } catch (e) { /* storage may be blocked */ }
-    toast(next === 'dark' ? 'Dark theme' : 'Light theme');
+    toast(next === 'dark' ? t('Dark theme') : t('Light theme'));
   });
+
+  /* ---------- language switch: remember the choice (it stops the first-visit redirect) and keep the section ---------- */
+  const langLink = $('#lang-switch');
+  if (langLink) {
+    const base = langLink.getAttribute('href');
+    langLink.addEventListener('click', () => {
+      try { localStorage.setItem('lang', langLink.getAttribute('hreflang') || ''); } catch (e) { /* storage may be blocked */ }
+      langLink.setAttribute('href', base + location.hash);
+    });
+  }
 
   /* ---------- nav: scrolled state, progress bar, mobile menu, scroll-spy ---------- */
   const nav = $('#nav');
@@ -55,7 +68,7 @@
   function setMenu(open) {
     links.classList.toggle('open', open);
     burger.setAttribute('aria-expanded', String(open));
-    burger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    burger.setAttribute('aria-label', open ? t('Close menu') : t('Open menu'));
   }
   burger.addEventListener('click', () => setMenu(!links.classList.contains('open')));
   links.addEventListener('click', (e) => { if (e.target.closest('a')) setMenu(false); });
@@ -102,7 +115,7 @@
     (function frame(now) {
       const p = Math.min(1, (now - t0) / dur);
       const eased = 1 - Math.pow(1 - p, 3);
-      el.textContent = pre + (to * eased).toFixed(dec) + suf;
+      el.textContent = pre + (to * eased).toFixed(dec).replace('.', LANG === 'es' ? ',' : '.') + suf; // Spanish uses a decimal comma
       if (p < 1) requestAnimationFrame(frame);
     })(t0);
   }
@@ -124,7 +137,9 @@
 
   /* ---------- reading shelf ---------- */
   const shelf = $('#shelf');
-  const books = window.BOOKS || [];
+  // On the Spanish page books-es.js supplies the translated category, byline and notes for each book id.
+  const tr = window.BOOKS_I18N || {};
+  const books = (window.BOOKS || []).map((b) => (tr[b.id] ? { ...b, ...tr[b.id] } : b));
   const dlg = $('#book-modal');
   let lastFocus = null;
 
@@ -178,7 +193,7 @@
     au.textContent = b.author;
     const go = document.createElement('span');
     go.className = 'book-go';
-    go.textContent = hasNotes ? 'Read my notes →' : 'Notes coming soon';
+    go.textContent = hasNotes ? t('Read my notes →') : t('Notes coming soon');
 
     btn.append(cover, cat, h3, au, go);
     li.append(btn);
@@ -241,7 +256,7 @@
       try { document.execCommand('copy'); } catch (err) { /* nothing else to try */ }
       ta.remove();
     }
-    toast('Email address copied');
+    toast(t('Email address copied'));
   });
 
   /* ---------- command palette (Ctrl/⌘ K) ---------- */
@@ -265,19 +280,21 @@
   };
   const open = (href) => window.open(href, '_blank', 'noopener');
 
+  const SECTIONS = [['about', t('About')], ['markets', t('Live S&P 500')], ['lab', t('Risk lab')], ['education', t('Education')], ['experience', t('Experience')],
+    ['portfolio', t('Portfolio case study')], ['projects', t('Projects & toolkit')], ['reading', t('Reading list')], ['contact', t('Contact')]];
   const items = [
-    ...[['about', 'About'], ['markets', 'Live S&P 500'], ['lab', 'Risk lab'], ['education', 'Education'], ['experience', 'Experience'],
-        ['portfolio', 'Portfolio case study'], ['projects', 'Projects & toolkit'], ['reading', 'Reading list'], ['contact', 'Contact']]
-      .map(([id, label]) => ({ label: `Go to ${label}`, hint: 'Section', icon: 'i-arrow-down', kw: `${id} section`, run: () => goTo(id) })),
-    { label: 'Download CV (English)', hint: 'File', icon: 'i-download', kw: 'resume cv english pdf', run: () => download('assets/docs/Julen_Beltran_CV_EN.pdf') },
-    { label: 'Descargar CV (Español)', hint: 'File', icon: 'i-download', kw: 'resume cv spanish espanol pdf', run: () => download('assets/docs/Julen_Beltran_CV_ES.pdf') },
-    { label: 'Read the portfolio report (PDF)', hint: 'File', icon: 'i-arrow-ur', kw: 'portfolio pdf report simulation', run: () => open('assets/docs/JP_Beltran_Portfolio_Summary.pdf') },
-    { label: 'Email Julen', hint: 'Contact', icon: 'i-mail', kw: 'mail contact message', run: () => { location.href = `mailto:${EMAIL}`; } },
-    { label: 'Copy email address', hint: 'Action', icon: 'i-copy', kw: 'email copy clipboard', run: () => $('#copy-email').click() },
-    { label: 'Open LinkedIn', hint: 'Link', icon: 'i-linkedin', kw: 'linkedin social profile', run: () => open('https://www.linkedin.com/in/julenbeltran') },
-    { label: 'Toggle light / dark theme', hint: 'Action', icon: 'i-moon', kw: 'theme dark light mode appearance', run: () => themeBtn.click() },
-    { label: 'View the source on GitHub', hint: 'Link', icon: 'i-arrow-ur', kw: 'github code source repository', run: () => open('https://github.com/xulenn/Julen-Beltran') },
+    ...SECTIONS.map(([id, name]) => ({ label: t('Go to {name}', { name }), hint: t('Section'), icon: 'i-arrow-down', kw: `${id} section ${t('section')}`, run: () => goTo(id) })),
+    { label: t('Download CV (English)'), hint: t('File'), icon: 'i-download', kw: t('resume cv english pdf'), run: () => download(`${ROOT}assets/docs/Julen_Beltran_CV_EN.pdf`) },
+    { label: t('Descargar CV (Español)'), hint: t('File'), icon: 'i-download', kw: t('resume cv spanish espanol pdf'), run: () => download(`${ROOT}assets/docs/Julen_Beltran_CV_ES.pdf`) },
+    { label: t('Read the portfolio report (PDF)'), hint: t('File'), icon: 'i-arrow-ur', kw: t('portfolio pdf report simulation'), run: () => open(`${ROOT}assets/docs/JP_Beltran_Portfolio_Summary.pdf`) },
+    { label: t('Email Julen'), hint: t('Contact'), icon: 'i-mail', kw: t('mail contact message'), run: () => { location.href = `mailto:${EMAIL}`; } },
+    { label: t('Copy email address'), hint: t('Action'), icon: 'i-copy', kw: t('email copy clipboard'), run: () => $('#copy-email').click() },
+    { label: t('Open LinkedIn'), hint: t('Link'), icon: 'i-linkedin', kw: t('linkedin social profile'), run: () => open('https://www.linkedin.com/in/julenbeltran') },
+    { label: t('Toggle light / dark theme'), hint: t('Action'), icon: 'i-moon', kw: t('theme dark light mode appearance'), run: () => themeBtn.click() },
+    { label: LANG === 'es' ? 'Read this site in English' : 'Leer esta web en español', hint: LANG === 'es' ? 'Idioma' : 'Language', icon: 'i-arrow-ur', kw: 'language idioma english inglés spanish español en es', run: () => { const l = $('#lang-switch'); if (l) l.click(); } },
+    { label: t('View the source on GitHub'), hint: t('Link'), icon: 'i-arrow-ur', kw: t('github code source repository'), run: () => open('https://github.com/xulenn/Julen-Beltran') },
   ];
+  const fold = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); // "inglés" matches "ingles"
 
   let shown = items;
   let sel = 0;
@@ -295,7 +312,7 @@
     if (!shown.length) {
       const li = document.createElement('li');
       li.className = 'empty';
-      li.textContent = 'No matches';
+      li.textContent = t('No matches');
       clist.append(li);
       cin.removeAttribute('aria-activedescendant');
       return;
@@ -323,8 +340,8 @@
     if (cur) cur.scrollIntoView({ block: 'nearest' });
   }
   function filterItems() {
-    const q = cin.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    shown = q.length ? items.filter((it) => q.every((t) => `${it.label} ${it.kw}`.toLowerCase().includes(t))) : items;
+    const q = fold(cin.value.trim()).split(/\s+/).filter(Boolean);
+    shown = q.length ? items.filter((it) => q.every((w) => fold(`${it.label} ${it.kw}`).includes(w))) : items;
     sel = 0;
     renderList();
   }

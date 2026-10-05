@@ -7,13 +7,16 @@ Hand-written HTML, CSS and JavaScript — no framework, no build step, no chart 
 ## Layout
 
 ```
-index.html              the page
+index.html              the page (English)
+es/index.html           the same page in Spanish (see "The Spanish version" below)
 assets/css/main.css     all styles (light/dark themes, responsive)
 assets/js/app.js        UI: theme, nav, reveals, reading shelf, ⌘K command palette
 assets/js/market.js     the S&P 500 section: ticker, canvas chart, stats, calculator
 assets/js/lab.js        the Risk lab section (five panels, rendered from the S&P history)
 assets/js/risk-math.js  the Risk lab's maths: pure functions, unit-tested
 assets/js/books.js      reading-list data and notes
+assets/js/i18n.js       t() + locale helpers shared by every script
+assets/js/lang-es.js    Spanish dictionary for the scripts; books-es.js = Spanish book notes
 assets/img, fonts, docs optimised images, self-hosted fonts (OFL), CVs and portfolio report
 assets/icons            apple-touch / PWA icons (site.webmanifest at the root; no service worker on purpose)
 scripts/                market-data fetcher + Risk-lab maths tests
@@ -57,8 +60,27 @@ averages with 95% ranges, drawn on a validated blue↔red diverging scale). All 
 `assets/js/risk-math.js`, whose unit tests (`node --test scripts/risk-math.test.mjs`) use series with
 analytically known answers. The text under each chart is generated from the numbers, so it can't drift out of sync.
 
+## The Spanish version
+
+`es/index.html` is the whole site in Spanish, served at `/es/` (so it has its own URL for sharing and search; both pages
+declare `hreflang` alternates and are in `sitemap.xml`). What decides which one a visitor sees:
+
+1. The **EN / ES link in the nav** always works and remembers the choice (`localStorage.lang`), keeping the section you were on.
+2. On the **first visit** to the English page, a tiny inline script sends Spanish-, Basque-, Catalan- and Galician-language
+   browsers to `/es/` (nothing is redirected once a choice is saved, and `?lang=en` opts out). The Spanish page never redirects.
+
+How it is built: the HTML text is translated in `es/index.html`; everything the scripts print (chart labels, tooltips, stat
+tiles, the Risk lab's generated sentences, the command palette, toasts) goes through `t('English text {placeholder}')` and is
+looked up in `assets/js/lang-es.js`. Numbers, dates and currency use the page locale (`es-ES`: `7.722,72`, `2 oct`, `10.000 $`,
+`12,5 %` with a non-breaking space). Book titles stay as they are; categories and notes come from `books-es.js`.
+
+`node --test scripts/i18n.test.mjs` (run in CI) fails if a string used in the scripts has no Spanish entry, if a placeholder
+is lost in translation, if a dictionary entry is stale, if the two HTML pages stop having the same structure (so a script
+hook can't exist in one language only), or if the hreflang/canonical/sitemap links stop being reciprocal.
+To add a text: put it in `index.html` **and** `es/index.html`, or call `t()` in a script and add the entry to `lang-es.js`.
+
 ## Editing content
 
-- Text and structure: `index.html`.
-- Books and notes: `assets/js/books.js`.
+- Text and structure: `index.html` and `es/index.html` (keep them in step; the tests check the structure).
+- Books and notes: `assets/js/books.js` (Spanish: `assets/js/books-es.js`).
 - CVs and the portfolio PDF: replace the files in `assets/docs/` (keep the names, or update the links).

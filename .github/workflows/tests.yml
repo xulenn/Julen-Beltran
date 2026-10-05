@@ -21,5 +21,7 @@ jobs:
         run: node --test scripts/market-data.test.mjs
       - name: Risk-lab maths tests
         run: node --test scripts/risk-math.test.mjs
+      - name: Spanish site tests (translations, page structure, SEO links)
+        run: node --test scripts/i18n.test.mjs
       - name: JavaScript syntax check
         run: for f in assets/js/*.js; do node --check "$f"; done

@@ -12,6 +12,11 @@
   const BASE = (document.querySelector('meta[name="market-data-base"]')?.content || '').replace(/\/?$/, '/');
   const DAY = 86_400_000;
   const MIN = '−'; // U+2212, a real minus sign
+  // i18n (assets/js/i18n.js): t() maps the English text to the page language; LOCALE/PC drive number and date formats
+  const t = window.JB?.t || ((s, v) => (v ? s.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m)) : s));
+  const LANG = window.JB?.lang || 'en';
+  const LOCALE = window.JB?.locale || 'en-US';
+  const PC = window.JB?.PC || '%';
 
   /* ---------- colours (the section is always dark) ---------- */
   const C = {
@@ -32,25 +37,25 @@
 
   /* ---------- formatting ---------- */
   const nfCache = {};
-  const nf = (d) => (nfCache[d] ||= new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const nf = (d) => (nfCache[d] ||= new Intl.NumberFormat(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: LANG === 'es' ? 'always' : true })); // Spanish skips the separator in 4-digit numbers unless told to always group
   const sign = (v) => (v > 0 ? '+' : v < 0 ? MIN : '');
   const fmtPrice = (v) => nf(2).format(v);
-  const fmtPct = (v, d = 1) => `${sign(Math.round(v * 10 ** d) ? v : 0)}${nf(d).format(Math.abs(v))}%`;
+  const fmtPct = (v, d = 1) => `${sign(Math.round(v * 10 ** d) ? v : 0)}${nf(d).format(Math.abs(v))}${PC}`;
   const fmtDelta = (v, d = 2) => `${sign(v)}${nf(d).format(Math.abs(v))}`;
   const fmtAxisPrice = (v) => (Number.isInteger(v) || Math.abs(v) >= 100 ? nf(0).format(v) : nf(2).format(v));
-  const fmtUsd = (v) => `$${nf(0).format(Math.round(v))}`;
+  const fmtUsd = (v) => (LANG === 'es' ? `${nf(0).format(Math.round(v))}\u00a0$` : `$${nf(0).format(Math.round(v))}`);
   const UTC = { timeZone: 'UTC' };
   const NY = { timeZone: 'America/New_York' };
   const F = {
-    dayLong: new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric', month: 'short', day: 'numeric' }),
-    dayShort: new Intl.DateTimeFormat('en-US', { ...UTC, month: 'short', day: 'numeric' }),
-    month: new Intl.DateTimeFormat('en-US', { ...UTC, month: 'short' }),
-    monthYear: new Intl.DateTimeFormat('en-US', { ...UTC, month: 'short', year: 'numeric' }),
-    year: new Intl.DateTimeFormat('en-US', { ...UTC, year: 'numeric' }),
-    etTime: new Intl.DateTimeFormat('en-US', { ...NY, hour: 'numeric', minute: '2-digit' }),
-    etHour: new Intl.DateTimeFormat('en-US', { ...NY, hour: 'numeric' }),
-    etDay: new Intl.DateTimeFormat('en-US', { ...NY, weekday: 'short' }),
-    etStamp: new Intl.DateTimeFormat('en-US', { ...NY, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+    dayLong: new Intl.DateTimeFormat(LOCALE, { ...UTC, year: 'numeric', month: 'short', day: 'numeric' }),
+    dayShort: new Intl.DateTimeFormat(LOCALE, { ...UTC, month: 'short', day: 'numeric' }),
+    month: new Intl.DateTimeFormat(LOCALE, { ...UTC, month: 'short' }),
+    monthYear: new Intl.DateTimeFormat(LOCALE, { ...UTC, month: 'short', year: 'numeric' }),
+    year: new Intl.DateTimeFormat(LOCALE, { ...UTC, year: 'numeric' }),
+    etTime: new Intl.DateTimeFormat(LOCALE, { ...NY, hour: 'numeric', minute: '2-digit' }),
+    etHour: new Intl.DateTimeFormat(LOCALE, { ...NY, hour: 'numeric' }),
+    etDay: new Intl.DateTimeFormat(LOCALE, { ...NY, weekday: 'short' }),
+    etStamp: new Intl.DateTimeFormat(LOCALE, { ...NY, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
     etParts: new Intl.DateTimeFormat('en-US', { ...NY, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', weekday: 'short' }),
   };
   const nyParts = (ms) => Object.fromEntries(F.etParts.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
@@ -58,10 +63,11 @@
 
   function ago(ms) {
     const s = Math.max(0, (Date.now() - ms) / 1000);
-    if (s < 90) return 'just now';
-    if (s < 3600) return `${Math.round(s / 60)} min ago`;
-    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-    return `${Math.round(s / 86400)} days ago`;
+    if (s < 90) return t('just now');
+    if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) });
+    if (s < 86400) return t('{n} h ago', { n: Math.round(s / 3600) });
+    const days = Math.round(s / 86400);
+    return days === 1 ? t('1 day ago') : t('{n} days ago', { n: days });
   }
 
   /* ---------- state ---------- */
@@ -152,7 +158,7 @@
   }
   const quote = (id) => S.live?.quotes?.find((q) => q.id === id) || null;
   const spxQuote = () => quote('spx');
-  const symName = (id) => quote(id)?.name || (id === 'spx' ? 'S&P 500' : id);
+  const symName = (id) => t(quote(id)?.name || (id === 'spx' ? 'S&P 500' : id)); // names come from the data file in English; the Spanish dictionary translates them
   const symDigits = (id) => quote(id)?.digits ?? 2;
   const fmtSym = (id, v) => nf(symDigits(id)).format(v);
 
@@ -171,8 +177,8 @@
     root.dataset.state = st;
     E.overlay.hidden = st === 'ready';
     E.retry.hidden = st !== 'error';
-    if (st === 'loading') E.overlayMsg.textContent = 'Loading the latest prices…';
-    if (st === 'error') E.overlayMsg.textContent = "Couldn't load market data right now. The page works fine without it.";
+    if (st === 'loading') E.overlayMsg.textContent = t('Loading the latest prices…');
+    if (st === 'error') E.overlayMsg.textContent = t("Couldn't load market data right now. The page works fine without it.");
   }
   E.retry.addEventListener('click', () => load(true));
 
@@ -209,20 +215,20 @@
     main.textContent = `${change > 0 ? '▲' : change < 0 ? '▼' : '•'} ${fmtDelta(change, symDigits(S.sym))} (${fmtPct(pct, 2)})`;
     const lbl = document.createElement('span');
     lbl.className = 'lbl';
-    lbl.textContent = open ? 'today' : 'last session';
+    lbl.textContent = open ? t('today') : t('last session');
     E.delta.append(main, lbl);
 
     E.state.hidden = false;
     E.state.classList.toggle('open', open);
-    E.state.textContent = S.synthetic ? 'Sample data' : open ? 'Market open' : 'Market closed';
+    E.state.textContent = S.synthetic ? t('Sample data') : open ? t('Market open') : t('Market closed');
 
     const parts = [];
-    parts.push(q ? `${F.etStamp.format(when)} ET` : `Close of ${F.dayLong.format(when)}`);
-    parts.push(q ? 'delayed ~15 min' : 'end-of-day data');
-    if (S.live?.generated) parts.push(`refreshed ${ago(Date.parse(S.live.generated))}`);
-    if (S.synthetic) parts.push('SAMPLE DATA — not real prices');
+    parts.push(q ? `${F.etStamp.format(when)} ET` : t('Close of {date}', { date: F.dayLong.format(when) }));
+    parts.push(q ? t('delayed ~15 min') : t('end-of-day data'));
+    if (S.live?.generated) parts.push(t('refreshed {ago}', { ago: ago(Date.parse(S.live.generated)) }));
+    if (S.synthetic) parts.push(t('SAMPLE DATA — not real prices'));
     const ageDays = (Date.now() - when) / DAY;
-    if (!S.synthetic && !open && ageDays > 4) parts.push(`⚠ last data is ${Math.round(ageDays)} days old`);
+    if (!S.synthetic && !open && ageDays > 4) parts.push(t('⚠ last data is {n} days old', { n: Math.round(ageDays) }));
     E.asof.textContent = parts.join(' · ');
 
     renderMini(spxQuote());
@@ -285,7 +291,7 @@
         item.className = 'tk';
         const name = document.createElement('span');
         name.className = 'tk-name';
-        name.textContent = q.name;
+        name.textContent = t(q.name);
         const price = document.createElement('span');
         price.className = 'tk-price';
         price.textContent = nf(q.digits ?? 2).format(q.price);
@@ -309,8 +315,8 @@
 
   /* ---------- ranges ---------- */
   const RANGE_DEFS = [
-    { id: '1D', need: 'intraday' }, { id: '5D', need: 'week' },
-    { id: '1M', m: 1 }, { id: '6M', m: 6 }, { id: 'YTD' }, { id: '1Y', m: 12 }, { id: '5Y', m: 60 }, { id: 'MAX', label: 'MAX' },
+    { id: '1D', need: 'intraday', label: t('1D') }, { id: '5D', need: 'week', label: t('5D') },
+    { id: '1M', m: 1, label: t('1M') }, { id: '6M', m: 6, label: t('6M') }, { id: 'YTD', label: t('YTD') }, { id: '1Y', m: 12, label: t('1Y') }, { id: '5Y', m: 60, label: t('5Y') }, { id: 'MAX', label: t('MAX') },
   ];
   const sessionDates = () => Object.keys(S.sess?.sessions || {}).sort();
   const available = (r) => {
@@ -404,7 +410,7 @@
   async function setSymbol(id) {
     if (id === S.sym) return;
     root.dataset.busy = '1';
-    if (!(await ensureHist(id))) { root.dataset.busy = ''; E.asset.value = S.sym; window.JB?.toast?.('That asset could not be loaded right now'); return; }
+    if (!(await ensureHist(id))) { root.dataset.busy = ''; E.asset.value = S.sym; window.JB?.toast?.(t('That asset could not be loaded right now')); return; }
     S.sym = id;
     if (S.cmp === id) S.cmp = histIds().find((x) => x !== id) || null;
     if (S.cmp && !(await ensureHist(S.cmp))) S.cmp = null;
@@ -414,7 +420,7 @@
     redraw(true);
   }
   async function setCompare(id) {
-    if (id && !(await ensureHist(id))) { window.JB?.toast?.('That asset could not be loaded right now'); buildAssets(); return; }
+    if (id && !(await ensureHist(id))) { window.JB?.toast?.(t('That asset could not be loaded right now')); buildAssets(); return; }
     const entering = id && !S.cmp;
     const leaving = !id && S.cmp;
     if (entering) { S.prevMode = S.mode; S.prevLog = S.log; S.mode = 'pct'; S.log = false; }
@@ -499,7 +505,7 @@
     }
     const base = Number.isFinite(s.prev) ? s.prev : ys[0];
     return {
-      kind: 'intraday', range: '1D', xs, ys, base, baseLabel: Number.isFinite(s.prev) ? 'Prev close' : null,
+      kind: 'intraday', range: '1D', xs, ys, base, baseLabel: Number.isFinite(s.prev) ? t('Prev close') : null,
       domain: [s.session.start * 1000, s.session.end * 1000],
       label: (i) => `${F.etStamp.format(xs[i])} ET`, ticks: hourTicks,
     };
@@ -520,7 +526,7 @@
     if (a) {
       const firstDay = nyDayNumber(t[0]);
       const i = bsearchLE(a.d, firstDay - 1);
-      if (i >= 0) { base = a.ys[i]; baseLabel = 'Prior close'; }
+      if (i >= 0) { base = a.ys[i]; baseLabel = t('Prior close'); }
     }
     return {
       kind: 'week', range: '5D', xs, ys, base, baseLabel, domain: [0, xs.length - 1], starts,
@@ -642,9 +648,9 @@
     E.canvas.height = Math.round(S.h * S.dpr);
   }
 
-  const EVENTS = [
-    ['1987-10-19', 'Black Monday'], ['2000-03-24', 'Dot-com peak'], ['2002-10-09', 'Dot-com low'], ['2007-10-09', 'Pre-crisis peak'],
-    ['2009-03-09', 'Financial-crisis low'], ['2020-03-23', 'COVID low'], ['2022-10-12', '2022 low'],
+  const EVENTS = [ // [date, label, label sits below the line (a low)]
+    ['1987-10-19', t('Black Monday'), true], ['2000-03-24', t('Dot-com peak'), false], ['2002-10-09', t('Dot-com low'), true], ['2007-10-09', t('Pre-crisis peak'), false],
+    ['2009-03-09', t('Financial-crisis low'), true], ['2020-03-23', t('COVID low'), true], ['2022-10-12', t('2022 low'), true],
   ];
 
   function plotSeries(v) {
@@ -683,7 +689,7 @@
     const count = S.h < 340 ? 4 : 5;
     const t = niceTicks(g.y1, g.y0, count);
     if (S.mode === 'price') return t.map((v) => ({ v, label: fmtAxisPrice(v) }));
-    return t.map((v) => ({ v, label: `${v > 0 ? '+' : v < 0 ? MIN : ''}${nf(Math.abs(v) >= 10 || v === 0 ? 0 : 1).format(Math.abs(v))}%` }));
+    return t.map((v) => ({ v, label: `${v > 0 ? '+' : v < 0 ? MIN : ''}${nf(Math.abs(v) >= 10 || v === 0 ? 0 : 1).format(Math.abs(v))}${PC}` }));
   }
 
   function draw() {
@@ -845,13 +851,13 @@
     if (S.mode === 'dd') {
       let lo = 0;
       for (let i = 1; i < n; i++) if (series[i] < series[lo]) lo = i;
-      if (lo !== n - 1 && series[lo] < -0.5) put(lo, `Max drawdown ${fmtPct(v.dd[lo], 1)}`, false);
+      if (lo !== n - 1 && series[lo] < -0.5) put(lo, t('Max drawdown {v}', { v: fmtPct(v.dd[lo], 1) }), false);
       return;
     }
     if (long) {
       const days = Float64Array.from(v.xs, (x) => Math.round(x / DAY));
       let lastX = -1e9;
-      EVENTS.forEach(([iso, text]) => {
+      EVENTS.forEach(([iso, text, low]) => {
         const day = Date.parse(iso) / DAY;
         if (day < days[0] || day > days[n - 1]) return;
         const i = bsearchLE(days, day);
@@ -860,7 +866,6 @@
         const y = sy(series[i]);
         if (x - lastX < 96) return; // keep labels from colliding
         lastX = x;
-        const low = /low|Monday/.test(text);
         ring(x, y, 3, C.line);
         ctx.textAlign = x > pr - 70 ? 'right' : x < pl + 50 ? 'left' : 'center';
         ctx.textBaseline = low ? 'top' : 'bottom';
@@ -871,9 +876,9 @@
     if (v.kind === 'daily' && v.xs[n - 1] - v.xs[0] > 4 * 365 * DAY) return; // long ranges of non-S&P assets: no clutter
     let hi = 0, lo = 0;
     for (let i = 1; i < n; i++) { if (series[i] > series[hi]) hi = i; if (series[i] < series[lo]) lo = i; }
-    const name = (i, kind) => `${kind} ${S.mode === 'price' ? fmtAxisPrice(v.ys[i]) : fmtPct(v.pct[i], 1)}`;
-    if (hi !== n - 1 && hi !== lo) put(hi, name(hi, 'High'), true);
-    if (lo !== n - 1 && lo !== hi && lo !== 0) put(lo, name(lo, 'Low'), false);
+    const val = (i) => (S.mode === 'price' ? fmtAxisPrice(v.ys[i]) : fmtPct(v.pct[i], 1));
+    if (hi !== n - 1 && hi !== lo) put(hi, t('High {v}', { v: val(hi) }), true);
+    if (lo !== n - 1 && lo !== hi && lo !== 0) put(lo, t('Low {v}', { v: val(lo) }), false);
   }
 
   function drawHover(v, g) {
@@ -922,13 +927,14 @@
     if (!v) return;
     const n = v.xs.length;
     const chg = (v.ys[n - 1] / v.base - 1) * 100;
-    const name = { '1D': 'today', '5D': 'the last 5 sessions', '1M': 'the last month', '6M': 'the last 6 months', YTD: 'this year so far', '1Y': 'the last year', '5Y': 'the last 5 years', MAX: `since ${new Date(v.xs[0]).getUTCFullYear()}` }[v.range];
+    const name = { '1D': t('today'), '5D': t('the last 5 sessions'), '1M': t('the last month'), '6M': t('the last 6 months'), YTD: t('this year so far'), '1Y': t('the last year'), '5Y': t('the last 5 years'), MAX: t('since {year}', { year: new Date(v.xs[0]).getUTCFullYear() }) }[v.range];
     if (v.ys2) {
       const chg2 = (v.ys2[n - 1] / v.base2 - 1) * 100;
-      E.canvas.setAttribute('aria-label', `${symName(S.sym)} versus ${symName(S.cmp)}, percentage change over ${name}: ${symName(S.sym)} ${fmtPct(chg, 1)}, ${symName(S.cmp)} ${fmtPct(chg2, 1)}. Use the left and right arrow keys to read values.`);
+      E.canvas.setAttribute('aria-label', t('{a} versus {b}, percentage change over {period}: {a} {pa}, {b} {pb}. Use the left and right arrow keys to read values.', { a: symName(S.sym), b: symName(S.cmp), period: name, pa: fmtPct(chg, 1), pb: fmtPct(chg2, 1) }));
       return;
     }
-    E.canvas.setAttribute('aria-label', `${symName(S.sym)} ${S.mode === 'dd' ? 'drawdown' : S.mode === 'pct' ? 'percentage change' : 'price'} over ${name}: ${fmtPct(chg, 1)}, latest ${fmtSym(S.sym, v.ys[n - 1])}. Use the left and right arrow keys to read values.`);
+    const kind = S.mode === 'dd' ? t('drawdown') : S.mode === 'pct' ? t('percentage change') : t('price');
+    E.canvas.setAttribute('aria-label', t('{a} {kind} over {period}: {chg}, latest {last}. Use the left and right arrow keys to read values.', { a: symName(S.sym), kind, period: name, chg: fmtPct(chg, 1), last: fmtSym(S.sym, v.ys[n - 1]) }));
   }
 
   /* ---------- hover, touch, keyboard ---------- */
@@ -953,9 +959,10 @@
   }
   function tipText(i) {
     const v = S.view;
-    if (v.ys2) return `${v.label(i)}: ${symName(S.sym)} ${fmtPct(v.pct[i], 2)}, ${symName(S.cmp)} ${fmtPct(v.pct2[i], 2)} since the start of the range`;
+    if (v.ys2) return t('{label}: {a} {pa}, {b} {pb} since the start of the range', { label: v.label(i), a: symName(S.sym), pa: fmtPct(v.pct[i], 2), b: symName(S.cmp), pb: fmtPct(v.pct2[i], 2) });
     const val = valueAt(i);
-    return `${v.label(i)}: ${fmtPrice(val.price)}, ${fmtPct(val.pct, 2)} versus ${v.baseLabel ? v.baseLabel.toLowerCase() : 'the start of the range'}${S.mode === 'dd' ? `, ${fmtPct(val.dd, 2)} from the peak` : ''}`;
+    const base = v.baseLabel ? v.baseLabel.toLowerCase() : t('the start of the range');
+    return t('{label}: {price}, {pct} versus {base}', { label: v.label(i), price: fmtPrice(val.price), pct: fmtPct(val.pct, 2), base }) + (S.mode === 'dd' ? t(', {dd} from the peak', { dd: fmtPct(val.dd, 2) }) : '');
   }
   const tipNodes = (() => {
     const b = document.createElement('b');
@@ -974,7 +981,7 @@
     if (v.ys2) {
       // one tooltip, every series: value leads, name follows, a short line in the series colour is the key
       tipNodes.b.textContent = v.label(i);
-      tipNodes.d.textContent = 'Change since the start of the range';
+      tipNodes.d.textContent = t('Change since the start of the range');
       tipNodes.k1.style.cssText = `background:${C.s1};opacity:1;height:3px`;
       tipNodes.k2.style.cssText = `background:${C.s2};opacity:1;height:3px`;
       tipNodes.t1.textContent = `${fmtPct(v.pct[i], 2)} ${symName(S.sym)} · ${fmtSym(S.sym, v.ys[i])}`;
@@ -984,9 +991,9 @@
       tipNodes.k2.style.cssText = 'opacity:.4';
       tipNodes.b.textContent = S.mode === 'dd' ? fmtPct(val.dd, 2) : S.mode === 'pct' ? fmtPct(val.pct, 2) : fmtSym(S.sym, val.price);
       tipNodes.d.textContent = v.label(i);
-      tipNodes.t1.textContent = S.mode === 'price' ? `Close ${fmtSym(S.sym, val.price)}` : `${symName(S.sym)} ${fmtSym(S.sym, val.price)}`;
-      const chg = v.baseLabel ? `${fmtPct(val.pct, 2)} vs ${v.baseLabel.toLowerCase()}` : `${fmtPct(val.pct, 2)} since range start`;
-      tipNodes.t2.textContent = S.mode === 'dd' ? `${fmtPct(val.dd, 2)} below peak` : chg;
+      tipNodes.t1.textContent = S.mode === 'price' ? t('Close {v}', { v: fmtSym(S.sym, val.price) }) : `${symName(S.sym)} ${fmtSym(S.sym, val.price)}`;
+      const chg = v.baseLabel ? t('{pct} vs {base}', { pct: fmtPct(val.pct, 2), base: v.baseLabel.toLowerCase() }) : t('{pct} since range start', { pct: fmtPct(val.pct, 2) });
+      tipNodes.t2.textContent = S.mode === 'dd' ? t('{dd} below peak', { dd: fmtPct(val.dd, 2) }) : chg;
     }
     E.tip.hidden = false;
     const x = g.sx(v.xs[i]);
@@ -1067,14 +1074,14 @@
     const from = F.dayLong.format(v.xs[0]);
     const dir = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '');
     E.stats.append(
-      tile(`${A} change`, fmtPct(pa, 2), `${fmtSym(S.sym, v.ys[0])} → ${fmtSym(S.sym, v.ys[n - 1])}`, dir(pa)),
-      tile(`${B} change`, fmtPct(pb, 2), `${fmtSym(S.cmp, v.ys2[0])} → ${fmtSym(S.cmp, v.ys2[n - 1])}`, dir(pb)),
-      tile('Gap', `${fmtDelta(gap, 1)} pts`, `${gap >= 0 ? A : B} ahead since ${from}`),
-      tile('Correlation', nf(2).format(rho).replace('-', MIN), `daily returns, ${nf(0).format(n - 1)} days`),
-      tile(`${A} max drawdown`, fmtPct(maxDrawdown(v.ys), 1), 'peak to trough in range'),
-      tile(`${B} max drawdown`, fmtPct(maxDrawdown(v.ys2), 1), 'peak to trough in range'),
-      tile(`${A} volatility`, `${nf(1).format(logReturnStats(v.ys))}%`, 'annualized, daily returns'),
-      tile(`${B} volatility`, `${nf(1).format(logReturnStats(v.ys2))}%`, years < 1 ? 'annualized, daily returns' : `over ${nf(years >= 10 ? 0 : 1).format(years)} years`),
+      tile(t('{a} change', { a: A }), fmtPct(pa, 2), `${fmtSym(S.sym, v.ys[0])} → ${fmtSym(S.sym, v.ys[n - 1])}`, dir(pa)),
+      tile(t('{a} change', { a: B }), fmtPct(pb, 2), `${fmtSym(S.cmp, v.ys2[0])} → ${fmtSym(S.cmp, v.ys2[n - 1])}`, dir(pb)),
+      tile(t('Gap'), t('{n} pts', { n: fmtDelta(gap, 1) }), t('{name} ahead since {date}', { name: gap >= 0 ? A : B, date: from })),
+      tile(t('Correlation'), nf(2).format(rho).replace('-', MIN), t('daily returns, {n} days', { n: nf(0).format(n - 1) })),
+      tile(t('{a} max drawdown', { a: A }), fmtPct(maxDrawdown(v.ys), 1), t('peak to trough in range')),
+      tile(t('{a} max drawdown', { a: B }), fmtPct(maxDrawdown(v.ys2), 1), t('peak to trough in range')),
+      tile(t('{a} volatility', { a: A }), `${nf(1).format(logReturnStats(v.ys))}${PC}`, t('annualized, daily returns')),
+      tile(t('{a} volatility', { a: B }), `${nf(1).format(logReturnStats(v.ys2))}${PC}`, years < 1 ? t('annualized, daily returns') : t('over {n} years', { n: nf(years >= 10 ? 0 : 1).format(years) })),
     );
   }
 
@@ -1098,7 +1105,7 @@
     });
     const note = document.createElement('li');
     note.className = 'note';
-    note.textContent = `Both start at 0% on ${F.dayLong.format(v.xs[0])}${S.range !== 'MAX' ? '' : ' — the first date both have data'}`;
+    note.textContent = S.range !== 'MAX' ? t('Both start at 0% on {date}', { date: F.dayLong.format(v.xs[0]) }) : t('Both start at 0% on {date} — the first date both have data', { date: F.dayLong.format(v.xs[0]) });
     E.legend.append(note);
   }
 
@@ -1118,24 +1125,25 @@
     const when = (i) => (v.kind === 'daily' ? F.dayLong.format(v.xs[i]) : v.kind === 'intraday' ? `${F.etTime.format(v.xs[i])} ET` : v.label(i).replace(' ET', ''));
     const dir = chg > 0 ? 'up' : chg < 0 ? 'down' : '';
     const tiles = [];
-    tiles.push(tile('Change', fmtPct(pct, 2), `${fmtDelta(chg, symDigits(S.sym))} pts ${v.baseLabel ? `vs ${v.baseLabel.toLowerCase()}` : 'over the range'}`, dir));
-    tiles.push(tile('Range high', fmtSym(S.sym, v.ys[hi]), when(hi)));
-    tiles.push(tile('Range low', fmtSym(S.sym, v.ys[lo]), when(lo)));
-    tiles.push(tile('Max drawdown', v.dd[trough] === 0 ? '0.0%' : fmtPct(v.dd[trough], 1), v.dd[trough] === 0 ? 'No decline from a peak' : `${when(peakI)} → ${when(trough)}`));
+    const dChg = fmtDelta(chg, symDigits(S.sym));
+    tiles.push(tile(t('Change'), fmtPct(pct, 2), v.baseLabel ? t('{n} pts vs {base}', { n: dChg, base: v.baseLabel.toLowerCase() }) : t('{n} pts over the range', { n: dChg }), dir));
+    tiles.push(tile(t('Range high'), fmtSym(S.sym, v.ys[hi]), when(hi)));
+    tiles.push(tile(t('Range low'), fmtSym(S.sym, v.ys[lo]), when(lo)));
+    tiles.push(tile(t('Max drawdown'), v.dd[trough] === 0 ? `${nf(1).format(0)}${PC}` : fmtPct(v.dd[trough], 1), v.dd[trough] === 0 ? t('No decline from a peak') : `${when(peakI)} → ${when(trough)}`));
 
     // annualised return + volatility need daily data over a meaningful span
     const years = (v.xs[n - 1] - v.xs[0]) / (365.25 * DAY);
     if (v.kind === 'daily' && years >= 1) {
       const cagr = ((end / v.ys[0]) ** (1 / years) - 1) * 100;
-      tiles.push(tile('Annualized return', fmtPct(cagr, 1), `price only, over ${nf(years >= 10 ? 0 : 1).format(years)} years`));
-    } else tiles.push(tile('Annualized return', '—', 'ranges of 1 year or more'));
+      tiles.push(tile(t('Annualized return'), fmtPct(cagr, 1), t('price only, over {n} years', { n: nf(years >= 10 ? 0 : 1).format(years) })));
+    } else tiles.push(tile(t('Annualized return'), '—', t('ranges of 1 year or more')));
     if (v.kind === 'daily' && n > 20) {
       let sum = 0, sum2 = 0;
       for (let i = 1; i < n; i++) { const r = Math.log(v.ys[i] / v.ys[i - 1]); sum += r; sum2 += r * r; }
       const m = n - 1;
       const sd = Math.sqrt(Math.max(0, (sum2 - (sum * sum) / m) / (m - 1))) * Math.sqrt(252) * 100;
-      tiles.push(tile('Volatility', `${nf(1).format(sd)}%`, 'annualized, daily returns'));
-    } else tiles.push(tile('Volatility', '—', 'needs daily data'));
+      tiles.push(tile(t('Volatility'), `${nf(1).format(sd)}${PC}`, t('annualized, daily returns')));
+    } else tiles.push(tile(t('Volatility'), '—', t('needs daily data')));
 
     // all-time high + 52-week range always come from the full history
     const a = histArrays(S.sym);
@@ -1144,11 +1152,11 @@
       let ath = 0;
       for (let i = 1; i < m; i++) if (a.ys[i] >= a.ys[ath]) ath = i;
       const off = (a.ys[m - 1] / a.ys[ath] - 1) * 100;
-      tiles.push(tile('Vs all-time high', off >= -0.005 ? 'At a record' : fmtPct(off, 1), `record close ${fmtSym(S.sym, a.ys[ath])} · ${F.dayLong.format(a.xs[ath])}`));
+      tiles.push(tile(t('Vs all-time high'), off >= -0.005 ? t('At a record') : fmtPct(off, 1), t('record close {v} · {date}', { v: fmtSym(S.sym, a.ys[ath]), date: F.dayLong.format(a.xs[ath]) })));
       const from = Math.max(0, bsearchLE(a.xs, a.xs[m - 1] - 365 * DAY));
       let h52 = -Infinity, l52 = Infinity;
       for (let i = from; i < m; i++) { if (a.ys[i] > h52) h52 = a.ys[i]; if (a.ys[i] < l52) l52 = a.ys[i]; }
-      tiles.push(tile('52-week range', `${nf(0).format(l52)} – ${nf(0).format(h52)}`, `${nf(0).format(((a.ys[m - 1] - l52) / (h52 - l52 || 1)) * 100)}% of the way up`, '', (a.ys[m - 1] - l52) / (h52 - l52 || 1)));
+      tiles.push(tile(t('52-week range'), `${nf(0).format(l52)} – ${nf(0).format(h52)}`, t('{p} of the way up', { p: `${nf(0).format(((a.ys[m - 1] - l52) / (h52 - l52 || 1)) * 100)}${PC}` }), '', (a.ys[m - 1] - l52) / (h52 - l52 || 1)));
     }
     E.stats.append(...tiles);
   }
@@ -1160,7 +1168,7 @@
     body.replaceChildren();
     const head = E.table.tHead.rows[0];
     head.replaceChildren();
-    const cols = v && v.ys2 ? ['Date', `${symName(S.sym)} close`, `${symName(S.sym)} change`, `${symName(S.cmp)} close`, `${symName(S.cmp)} change`] : ['Date', 'Close', 'Change in range'];
+    const cols = v && v.ys2 ? [t('Date'), t('{a} close', { a: symName(S.sym) }), t('{a} change', { a: symName(S.sym) }), t('{a} close', { a: symName(S.cmp) }), t('{a} change', { a: symName(S.cmp) })] : [t('Date'), t('Close'), t('Change in range')];
     cols.forEach((t) => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = t; head.append(th); });
     if (!v) return;
     const n = v.xs.length;
@@ -1203,18 +1211,18 @@
     const amount = Math.max(1, Math.min(1e9, parseFloat(E.amount.value) || 0));
     const year = parseInt(E.year.value, 10);
     const start = a.xs.findIndex((x) => new Date(x).getUTCFullYear() === year);
-    if (start < 0 || !amount) { E.cres.textContent = 'Enter an amount and a starting year.'; return; }
+    if (start < 0 || !amount) { E.cres.textContent = t('Enter an amount and a starting year.'); return; }
     const m = a.ys.length;
     const mult = a.ys[m - 1] / a.ys[start];
     const years = (a.xs[m - 1] - a.xs[start]) / (365.25 * DAY);
     const cagr = (mult ** (1 / years) - 1) * 100;
     E.cres.replaceChildren();
     const lead = document.createElement('span');
-    lead.textContent = `${fmtUsd(amount)} invested on ${F.dayLong.format(a.xs[start])} would be worth about`;
+    lead.textContent = t('{amount} invested on {date} would be worth about', { amount: fmtUsd(amount), date: F.dayLong.format(a.xs[start]) });
     const big = document.createElement('strong');
     big.textContent = fmtUsd(amount * mult);
     const tail = document.createElement('span');
-    tail.textContent = `today — ${nf(mult >= 10 ? 1 : 2).format(mult)}× your money, or ${fmtPct(cagr, 1)} a year over ${nf(1).format(years)} years.`;
+    tail.textContent = t('today — {mult}× your money, or {cagr} a year over {n} years.', { mult: nf(mult >= 10 ? 1 : 2).format(mult), cagr: fmtPct(cagr, 1), n: nf(1).format(years) });
     E.cres.append(lead, big, tail);
     calcState.xs = a.xs.subarray(start);
     calcState.ys = Float64Array.from(a.ys.subarray(start), (y) => (amount * y) / a.ys[start]);
@@ -1260,7 +1268,7 @@
     c.beginPath(); c.moveTo(pl, Math.round(sy(ys[0])) + 0.5); c.lineTo(pr, Math.round(sy(ys[0])) + 0.5); c.stroke();
     c.font = MONO; c.fillStyle = C.axis; c.textBaseline = 'alphabetic';
     c.textAlign = 'left'; c.fillText(String(new Date(xs[0]).getUTCFullYear()), pl, h - 6);
-    c.textAlign = 'right'; c.fillText('today', pr, h - 6);
+    c.textAlign = 'right'; c.fillText(t('today'), pr, h - 6);
     const lx = sx(xs[xs.length - 1]);
     const ly = sy(ys[ys.length - 1]);
     c.beginPath(); c.arc(lx, ly, 6, 0, Math.PI * 2); c.fillStyle = C.surface; c.fill();

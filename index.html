@@ -3,15 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>
+    // First visit from a Spanish-language browser (and no saved choice): go to the Spanish page. The EN/ES link in the
+    // nav saves the reader's choice; "?lang=en" opts out for browsers that block storage.
+    (function () {
+      var saved = null;
+      try { saved = localStorage.getItem('lang'); } catch (e) {}
+      var pref = ((navigator.languages && navigator.languages[0]) || navigator.language || '').slice(0, 2).toLowerCase();
+      if ((saved ? saved === 'es' : /^(es|eu|ca|gl)$/.test(pref)) && !/[?&]lang=en(&|$)/.test(location.search)) location.replace('es/' + location.search + location.hash);
+    })();
+  </script>
   <title translate="no">Julen Beltran — Finance &amp; Business Management</title>
   <meta name="description" content="Julen Beltran — Business Management student (UPV/EHU) focused on finance. Exchange year at Columbus State, internship at Kutxabank, a simulated portfolio that beat the S&amp;P 500, and a live S&amp;P 500 chart built by hand." />
   <link rel="canonical" href="https://xulenn.github.io/Julen-Beltran/" />
+  <link rel="alternate" hreflang="en" href="https://xulenn.github.io/Julen-Beltran/" />
+  <link rel="alternate" hreflang="es" href="https://xulenn.github.io/Julen-Beltran/es/" />
+  <link rel="alternate" hreflang="x-default" href="https://xulenn.github.io/Julen-Beltran/" />
   <meta name="theme-color" content="#f4f0e8" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#11110f" media="(prefers-color-scheme: dark)" />
   <meta name="color-scheme" content="light dark" />
 
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Julen Beltran" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:locale:alternate" content="es_ES" />
   <meta property="og:title" content="Julen Beltran — Finance &amp; Business Management" />
   <meta property="og:description" content="Finance student, banking intern, portfolio manager (simulated) — and a live S&amp;P 500 chart built from scratch." />
   <meta property="og:url" content="https://xulenn.github.io/Julen-Beltran/" />
@@ -93,6 +108,7 @@
       <li><a href="#contact">Contact</a></li>
     </ul>
     <div class="nav-tools">
+      <a class="icon-btn lang-btn" id="lang-switch" href="es/" hreflang="es" lang="es" aria-label="ES — leer en español" title="Leer en español"><span aria-hidden="true">ES</span></a>
       <button class="icon-btn kbd-btn" id="cmdk-open" type="button" aria-label="⌘K — open command menu" aria-keyshortcuts="Control+K Meta+K">
         <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><kbd>⌘K</kbd>
       </button>
@@ -334,7 +350,7 @@
           <div class="se">
             <div class="se-left">
               <div class="rp-read se-read" id="lab-se-read" aria-live="polite"></div>
-              <div class="se-hm" id="lab-se-hm" tabindex="0" role="img" aria-label="Heat map of S&amp;P 500 monthly returns, one row per year and one column per month. Use the arrow keys to move between months; the details appear below the chart."></div>
+              <div class="se-hm" id="lab-se-hm" tabindex="0" role="img" aria-label="Heat map of S&amp;P 500 monthly returns, one row per year and one column per month. Use the arrow keys to move between months; the details appear above the chart."></div>
               <div class="se-scale" id="lab-se-scale" aria-hidden="true"></div>
             </div>
             <div class="se-right">
@@ -648,6 +664,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="assets/js/i18n.js" defer></script>
 <script src="assets/js/books.js" defer></script>
 <script src="assets/js/app.js" defer></script>
 <script src="assets/js/market.js" defer></script>
