@@ -1,5 +1,5 @@
 name: probe-sources
-# TEMPORARY: checks which market-data sources are reachable from GitHub-hosted runners.
+# TEMPORARY: inspects the Cboe delayed-quote JSON layout from a GitHub-hosted runner.
 on:
   push:
     branches: [claude/funny-hamilton-lwm0v7]
@@ -12,34 +12,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Probe
+      - name: Probe Cboe
         shell: bash
         run: |
           UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-          probe() {
-            name="$1"; shift
-            echo; echo "=== $name"
-            curl -sS -L -m 20 -o /tmp/body -D /tmp/hdr -A "$UA" -w 'RESULT http=%{http_code} time=%{time_total}s size=%{size_download}\n' "$@" 2>&1 || echo "RESULT curl-failed($?)"
-            echo -n "ACAO: "; grep -i '^access-control-allow-origin' /tmp/hdr | head -1 || true; echo
-            echo -n "BODY: "; head -c 260 /tmp/body | tr '\n\r' '  '; echo
-          }
-          probe yahoo_chart_q1 'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=5d&interval=1d'
-          probe yahoo_chart_q2 'https://query2.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=5d&interval=1d'
-          probe yahoo_spark 'https://query1.finance.yahoo.com/v7/finance/spark?symbols=%5EGSPC,%5EIXIC&range=1mo&interval=1d'
-          # cookie + crumb flow
-          rm -f /tmp/jar; curl -s -m 15 -c /tmp/jar -A "$UA" -o /dev/null -w 'fc.yahoo.com http=%{http_code}\n' https://fc.yahoo.com || true
-          CRUMB=$(curl -s -m 15 -b /tmp/jar -c /tmp/jar -A "$UA" https://query1.finance.yahoo.com/v1/test/getcrumb || true)
-          echo "crumb length: ${#CRUMB}  (first chars: ${CRUMB:0:12})"
-          probe yahoo_chart_crumb -b /tmp/jar "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=5d&interval=1d&crumb=${CRUMB}"
-          probe stooq_daily 'https://stooq.com/q/d/l/?s=%5Espx&i=d'
-          probe stooq_quote 'https://stooq.com/q/l/?s=%5Espx&f=sd2t2ohlcv&h&e=csv'
-          probe fred_csv 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500'
-          probe cboe_hist 'https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_SPX.json'
-          probe cboe_intraday 'https://cdn.cboe.com/api/global/delayed_quotes/charts/intraday/_SPX.json'
-          probe cboe_quote_head -r 0-600 'https://cdn.cboe.com/api/global/delayed_quotes/quotes/_SPX.json'
-          probe nasdaq_info -H 'Accept: application/json' 'https://api.nasdaq.com/api/quote/SPX/info?assetclass=index'
-          probe nasdaq_chart -H 'Accept: application/json' 'https://api.nasdaq.com/api/quote/SPX/chart?assetclass=index'
-          probe alphavantage_demo 'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=IBM&apikey=demo&datatype=csv'
-          probe twelvedata_demo 'https://api.twelvedata.com/time_series?symbol=SPX&interval=1day&outputsize=5&apikey=demo'
-          probe datahub_monthly 'https://raw.githubusercontent.com/datasets/s-and-p-500/main/data/data.csv'
-          probe stooq_alt_host 'https://stooq.pl/q/d/l/?s=%5Espx&i=d'
+          B=https://cdn.cboe.com/api/global/delayed_quotes
+          get() { curl -sS -m 30 -A "$UA" -H 'Accept: application/json' -o "$2" -w '%{http_code} %{size_download}B %{time_total}s' "$1" || echo "curl-failed"; }
+
+          echo "##### quote layout for _SPX (options removed)"
+          get "$B/quotes/_SPX.json" /tmp/spx.json; echo
+          jq -c '{timestamp, keys: (.data | del(.options) | keys), sample: (.data | del(.options) | with_entries(select(.value|type!="object")))}' /tmp/spx.json | head -c 2500; echo
+          jq -c '.data.options | length' /tmp/spx.json
+
+          echo; echo "##### historical layout _SPX"
+          get "$B/charts/historical/_SPX.json" /tmp/h.json; echo
+          jq -c '{timestamp, n: (.data|length), first: .data[0], last: .data[-1], last3: .data[-3:], nonpos_close: ([.data[]|select((.close|tonumber)<=0)]|length), keys: (.data[0]|keys)}' /tmp/h.json
+
+          echo; echo "##### intraday layout _SPX"
+          get "$B/charts/intraday/_SPX.json" /tmp/i.json; echo
+          jq -c '{timestamp, n: (.data|length), first: .data[0], last: .data[-1], days: ([.data[].datetime[0:10]]|unique)}' /tmp/i.json
+
+          echo; echo "##### candidate symbols (quote endpoint): status, price, prev close, time"
+          for s in _SPX _NDX _RUT _VIX _DJX _XSP _OEX DIA SPY QQQ IWM GLD SLV TLT IEF USO UUP FXE EWP EZU IBIT BITO VGK EWG; do
+            code=$(curl -sS -m 25 -A "$UA" -o /tmp/q.json -w '%{http_code}' "$B/quotes/$s.json" || echo fail)
+            if [ "$code" = "200" ]; then
+              echo -n "$s  200  "; jq -c '.data | {symbol, type: .security_type, current_price, price_change, price_change_percent, prev_day_close, close, last_trade_time, iv30}' /tmp/q.json
+            else echo "$s  $code"; fi
+          done
+
+          echo; echo "##### candidate symbols (historical endpoint)"
+          for s in _NDX _RUT _VIX _DJX GLD TLT DIA; do
+            code=$(curl -sS -m 25 -A "$UA" -o /tmp/hh.json -w '%{http_code}' "$B/charts/historical/$s.json" || echo fail)
+            if [ "$code" = "200" ]; then echo -n "$s 200  "; jq -c '{n:(.data|length), first:.data[0].date, last:.data[-1].date, lastclose:.data[-1].close}' /tmp/hh.json; else echo "$s $code"; fi
+          done
