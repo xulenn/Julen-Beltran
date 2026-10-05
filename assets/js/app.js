@@ -267,7 +267,7 @@
   const open = (href) => window.open(href, '_blank', 'noopener');
 
   const items = [
-    ...[['about', 'About'], ['markets', 'Live S&P 500'], ['education', 'Education'], ['experience', 'Experience'],
+    ...[['about', 'About'], ['markets', 'Live S&P 500'], ['lab', 'Risk lab'], ['education', 'Education'], ['experience', 'Experience'],
         ['portfolio', 'Portfolio case study'], ['projects', 'Projects & toolkit'], ['reading', 'Reading list'], ['contact', 'Contact']]
       .map(([id, label]) => ({ label: `Go to ${label}`, hint: 'Section', icon: 'i-arrow-down', kw: `${id} section`, run: () => goTo(id) })),
     { label: 'Download CV (English)', hint: 'File', icon: 'i-download', kw: 'resume cv english pdf', run: () => download('assets/docs/Julen_Beltran_CV_EN.pdf') },

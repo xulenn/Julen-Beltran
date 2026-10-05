@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://xulenn.github.io/Julen-Beltran/sitemap.xml

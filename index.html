@@ -84,6 +84,7 @@
     <ul class="nav-links" id="nav-links">
       <li><a href="#about">About</a></li>
       <li><a href="#markets">Markets</a></li>
+      <li><a href="#lab">Lab</a></li>
       <li><a href="#experience">Experience</a></li>
       <li><a href="#portfolio">Portfolio</a></li>
       <li><a href="#reading">Reading</a></li>
@@ -261,10 +262,70 @@
     </div>
   </section>
 
+  <!-- RISK LAB -->
+  <section class="section" id="lab" aria-labelledby="lab-title">
+    <div class="wrap">
+      <p class="kicker reveal"><span>03</span> Risk lab</p>
+      <div class="lab-head">
+        <h2 class="display reveal" id="lab-title">Four questions about <em>risk</em>.</h2>
+        <p class="lab-sub reveal">Everything below is calculated in your browser from the same daily S&amp;P&nbsp;500 data as the chart above — <span id="lab-span">decades of it</span>. Price only: no dividends, no inflation adjustment, no taxes.</p>
+      </div>
+
+      <p class="lab-wait" id="lab-wait">The risk lab appears as soon as the market data has loaded.</p>
+      <div class="lab-grid" id="lab-grid" hidden>
+        <article class="lab-card lab-wide">
+          <p class="label">01 · Time in the market</p>
+          <h3>How long do you need to hold?</h3>
+          <p class="lab-take" id="lab-hold-take"></p>
+          <div class="rp" id="lab-hold"></div>
+          <div class="rp-read" id="lab-hold-read" aria-live="polite"></div>
+          <ul class="rp-key" aria-hidden="true">
+            <li><i class="k-whisk"></i>worst to best window</li>
+            <li><i class="k-box"></i>middle 80% of windows</li>
+            <li><i class="k-med"></i>median</li>
+          </ul>
+          <p class="lab-foot" id="lab-hold-foot"></p>
+        </article>
+
+        <article class="lab-card">
+          <p class="label">02 · Drawdowns</p>
+          <h3>How deep, and for how long?</h3>
+          <p class="lab-take" id="lab-dd-take"></p>
+          <div class="dd-wrap"><table class="dd" id="lab-dd">
+            <caption class="sr-only">The deepest declines of the S&amp;P 500 from a peak, with dates and recovery time</caption>
+            <thead><tr><th scope="col">Decline</th><th scope="col">Peak → trough</th><th scope="col" class="c-down">Time down</th><th scope="col">Back to peak</th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </article>
+
+        <article class="lab-card">
+          <p class="label">03 · Missing the best days</p>
+          <h3>What if you sat out the best days?</h3>
+          <div class="seg lab-seg" id="lab-bd-range" role="radiogroup" aria-label="Period"></div>
+          <ul class="bd" id="lab-bd"></ul>
+          <p class="lab-take" id="lab-bd-take"></p>
+          <p class="lab-foot" id="lab-bd-foot"></p>
+        </article>
+
+        <article class="lab-card lab-wide">
+          <p class="label">04 · Fat tails</p>
+          <h3>Markets are not a bell curve</h3>
+          <p class="lab-take" id="lab-ft-take"></p>
+          <div class="ft-chart" id="lab-ft" role="img" aria-label="Histogram of daily S&amp;P 500 returns on a logarithmic count axis, compared with a normal distribution"></div>
+          <ul class="ft-key">
+            <li><i class="k-bar"></i>actual daily returns</li>
+            <li><i class="k-line"></i>if returns were normally distributed</li>
+          </ul>
+          <dl class="ft-stats" id="lab-ft-stats"></dl>
+        </article>
+      </div>
+    </div>
+  </section>
+
   <!-- EDUCATION -->
   <section class="section" id="education" aria-labelledby="edu-title">
     <div class="wrap">
-      <p class="kicker reveal"><span>03</span> Education</p>
+      <p class="kicker reveal"><span>04</span> Education</p>
       <h2 class="display sm reveal" id="edu-title">Two universities, <em>two continents</em>.</h2>
       <div class="edu-grid">
         <article class="card spot reveal">
@@ -304,7 +365,7 @@
   <!-- EXPERIENCE -->
   <section class="section" id="experience" aria-labelledby="exp-title">
     <div class="wrap">
-      <p class="kicker reveal"><span>04</span> Experience</p>
+      <p class="kicker reveal"><span>05</span> Experience</p>
       <h2 class="display sm reveal" id="exp-title">Where I've <em>worked</em>.</h2>
       <ol class="timeline">
         <li class="tl-item reveal">
@@ -361,7 +422,7 @@
   <!-- PORTFOLIO CASE STUDY -->
   <section class="section" id="portfolio" aria-labelledby="pf-title">
     <div class="wrap">
-      <p class="kicker reveal"><span>05</span> Portfolio case study</p>
+      <p class="kicker reveal"><span>06</span> Portfolio case study</p>
       <div class="pf-head">
         <h2 class="display sm reveal" id="pf-title">A $100,000 portfolio that <em>beat the market</em>.</h2>
         <p class="pf-sub reveal">As a member of the Finance Student Association at Columbus State, I managed a simulated portfolio from <strong>12 January to 10 April 2026</strong> — equities plus short-term options, built around volatility, macro events and momentum.</p>
@@ -447,7 +508,7 @@
   <!-- PROJECTS & TOOLKIT -->
   <section class="section" id="projects" aria-labelledby="proj-title">
     <div class="wrap">
-      <p class="kicker reveal"><span>06</span> Projects &amp; toolkit</p>
+      <p class="kicker reveal"><span>07</span> Projects &amp; toolkit</p>
       <h2 class="display sm reveal" id="proj-title">What I'm <em>building</em> and learning.</h2>
       <div class="proj-grid">
         <article class="card spot reveal">
@@ -491,7 +552,7 @@
   <!-- READING -->
   <section class="section" id="reading" aria-labelledby="read-title">
     <div class="wrap">
-      <p class="kicker reveal"><span>07</span> Reading list</p>
+      <p class="kicker reveal"><span>08</span> Reading list</p>
       <div class="read-head">
         <h2 class="display sm reveal" id="read-title">Books that <em>shaped</em> how I think.</h2>
         <div class="shelf-nav reveal" aria-label="Scroll the reading list">
@@ -511,7 +572,7 @@
   <section class="section band-dark contact" id="contact" aria-labelledby="contact-title">
     <div class="wrap contact-grid">
       <div>
-        <p class="kicker"><span>08</span> Contact</p>
+        <p class="kicker"><span>09</span> Contact</p>
         <h2 class="display" id="contact-title">Let's start a <em>conversation.</em></h2>
         <p class="contact-sub">Open to banking and corporate-finance opportunities. The fastest way to reach me is email or LinkedIn.</p>
       </div>
@@ -562,5 +623,7 @@
 <script src="assets/js/books.js" defer></script>
 <script src="assets/js/app.js" defer></script>
 <script src="assets/js/market.js" defer></script>
+<script src="assets/js/risk-math.js" defer></script>
+<script src="assets/js/lab.js" defer></script>
 </body>
 </html>
