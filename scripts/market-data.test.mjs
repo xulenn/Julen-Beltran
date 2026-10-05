@@ -1,78 +1,83 @@
-// Run with: node --test scripts/
-// Fixtures mimic the real response shapes of Yahoo's v8 chart API and Stooq/FRED CSVs.
-// They are generated in-memory and never written to the repo or shown on the site.
+// Run with: node --test scripts/market-data.test.mjs
+// Fixtures mimic the real layout of Cboe's delayed-quote JSON (numbers as strings, ET wall-clock
+// times, history from 1975). They are generated in memory and never written to the repo or shown
+// on the site.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseYahooChart, parseCsvSeries, buildQuote, run, tuning } from './market-data.mjs';
+import { etToEpoch, parseHistory, parseQuote, parseIntraday, downsample5, run, tuning, SYMBOLS } from './market-data.mjs';
 
 tuning.retryMs = 0;
 tuning.politeMs = 0;
 const silent = () => {};
+const iso = (sec) => new Date(sec * 1000).toISOString();
 
-function yahooJson({ n, stepSec, endTs, base = 5000, gmtoffset = -14400, price, nulls = [] }) {
-  const timestamp = [];
-  const close = [];
-  for (let i = 0; i < n; i++) {
-    timestamp.push(endTs - (n - 1 - i) * stepSec);
-    close.push(nulls.includes(i) ? null : base + Math.sin(i / 9) * 40 + i * 0.5);
+test('etToEpoch handles EDT, EST and both DST transition days', () => {
+  assert.equal(iso(etToEpoch('2026-10-02T09:31:00')), '2026-10-02T13:31:00.000Z'); // EDT, UTC-4
+  assert.equal(iso(etToEpoch('2026-12-15T09:31:00')), '2026-12-15T14:31:00.000Z'); // EST, UTC-5
+  assert.equal(iso(etToEpoch('2026-03-08T09:31:00')), '2026-03-08T13:31:00.000Z'); // spring-forward day, already EDT
+  assert.equal(iso(etToEpoch('2026-11-01T09:31:00')), '2026-11-01T14:31:00.000Z'); // fall-back day, already EST
+  assert.throws(() => etToEpoch('nope'), /Bad ET/);
+});
+
+function historyJson({ from = '1975-01-02', to = '2026-10-02', start = 70 }) {
+  const rows = [];
+  let v = start;
+  for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 86_400_000) {
+    const wd = new Date(t).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    v *= 1 + Math.sin(t / 3e9) * 0.002 + 0.0004;
+    rows.push({ date: new Date(t).toISOString().slice(0, 10), volume: '0.0', open: '0.000000', high: (v * 1.01).toFixed(6), low: (v * 0.99).toFixed(6), close: v.toFixed(6) });
   }
-  return {
-    chart: {
-      error: null,
-      result: [{
-        meta: {
-          symbol: '^GSPC', gmtoffset, regularMarketTime: endTs,
-          regularMarketPrice: price ?? close[n - 1],
-          chartPreviousClose: close[0], regularMarketDayHigh: base + 60, regularMarketDayLow: base - 60,
-          fiftyTwoWeekHigh: base + 200, fiftyTwoWeekLow: base - 900,
-          currentTradingPeriod: { regular: { start: endTs - 20_000, end: endTs + 5_000, gmtoffset } },
-        },
-        timestamp,
-        indicators: { quote: [{ open: close, high: close, low: close, close, volume: close.map(() => 1) }] },
-      }],
-    },
-  };
+  return { timestamp: '2026-10-05 02:01:33', data: rows };
 }
 
-test('parseYahooChart drops null closes and rejects error payloads', () => {
-  const p = parseYahooChart(yahooJson({ n: 10, stepSec: 300, endTs: 1_800_000_000, nulls: [2, 3] }));
-  assert.equal(p.c.length, 8);
-  assert.equal(p.t.length, 8);
-  assert.throws(() => parseYahooChart({ chart: { error: { code: 'Not Found', description: 'nope' } } }), /Not Found/);
-  assert.throws(() => parseYahooChart({}), /no price series/);
+test('parseHistory reads string numbers, drops bad rows, keeps order', () => {
+  const j = historyJson({ from: '2026-09-28', to: '2026-10-02' });
+  j.data.splice(2, 0, { date: '2026-09-30', close: '0.000000' }, { date: 'garbage', close: '5' }, { date: '2026-09-29', close: '7000' });
+  const h = parseHistory(j);
+  assert.equal(h.d.length, 5);
+  assert.ok(h.d.every((x, i) => i === 0 || x > h.d[i - 1]));
+  assert.ok(h.c.every((x) => x > 0));
+  assert.throws(() => parseHistory({ data: [] }), /no rows/);
 });
 
-test('buildQuote uses the previous trading day as the reference close', () => {
-  const day = 86_400;
-  const end = Math.floor(Date.UTC(2026, 9, 5, 14, 30) / 1000); // "today" 10:30 NY
-  const t = [end - 2 * day, end - day, end];
-  const chart = { meta: { regularMarketPrice: 110, regularMarketTime: end, gmtoffset: -14400 }, t, c: [98, 100, 108] };
-  const q = buildQuote({ id: 'x', symbol: 'X', name: 'X' }, chart);
-  assert.equal(q.prev, 100);
-  assert.equal(q.price, 110);
-  assert.equal(q.change, 10);
-  assert.equal(q.pct, 10);
+const quoteJson = (price, change, pct, last = '2026-10-02T16:14:59') => ({
+  timestamp: '2026-10-05 07:38:10',
+  data: { symbol: '^SPX', current_price: price, price_change: change, price_change_percent: pct, prev_day_close: price, last_trade_time: last, options: [{ option: 'x' }] },
 });
 
-test('buildQuote normalises a x10 yield quote', () => {
-  const end = 1_800_000_000;
-  const chart = { meta: { regularMarketPrice: 42.5, regularMarketTime: end, gmtoffset: 0 }, t: [end - 86_400 * 2, end - 86_400, end], c: [41, 42, 42.5] };
-  const q = buildQuote({ id: 'tnx', symbol: '^TNX', name: 'US 10Y', kind: 'yield' }, chart);
-  assert.equal(q.price, 4.25);
+test('parseQuote derives the reference close from price_change (prev_day_close is overwritten after the bell)', () => {
+  const q = parseQuote(quoteJson(7722.7202, 56.2702, 0.7286));
+  assert.ok(Math.abs(q.prev - 7666.45) < 1e-6);
+  assert.equal(iso(q.time), '2026-10-02T20:14:59.000Z');
+  assert.throws(() => parseQuote({ data: { current_price: 'x' } }), /missing price/);
 });
 
-test('parseCsvSeries handles Stooq and FRED layouts (and FRED holidays)', () => {
-  const stooq = 'Date,Open,High,Low,Close,Volume\n1950-01-03,16.66,16.66,16.66,16.66,1260000\n1950-01-04,16.85,16.85,16.85,16.85,1890000\n';
-  const s = parseCsvSeries(stooq, 4);
-  assert.deepEqual(s.c, [16.66, 16.85]);
-  assert.equal(s.d[1] - s.d[0], 1);
-  const fred = 'observation_date,SP500\n2025-01-01,.\n2025-01-02,5868.55\n';
-  const f = parseCsvSeries(fred, 1);
-  assert.deepEqual(f.c, [5868.55]);
-  assert.throws(() => parseCsvSeries('Get your apikey at ...', 4), /Not a CSV/);
+function intradayJson(date, n = 389) {
+  const data = [];
+  for (let i = 0; i < n; i++) {
+    const mins = 9 * 60 + 31 + i;
+    const hh = String(Math.floor(mins / 60)).padStart(2, '0');
+    const mm = String(mins % 60).padStart(2, '0');
+    const px = 7700 + Math.sin(i / 20) * 15;
+    data.push({ datetime: `${date}T${hh}:${mm}:00`, sequence_number: i, price: { open: px, high: px + 1, low: px - 1, close: px }, volume: {} });
+  }
+  return { timestamp: `${date} 20:14:23`, data };
+}
+
+test('parseIntraday keeps only the latest session; downsample5 shrinks it and keeps the last bar', () => {
+  const j = intradayJson('2026-10-02');
+  j.data.unshift(...intradayJson('2026-10-01', 20).data);
+  const day = parseIntraday(j);
+  assert.equal(day.date, '2026-10-02');
+  assert.equal(day.t.length, 389);
+  const small = downsample5(day.t, day.c);
+  assert.ok(small.t.length > 70 && small.t.length < 90);
+  assert.equal(small.t[small.t.length - 1], day.t[day.t.length - 1]);
+  assert.throws(() => parseIntraday(intradayJson('2026-10-02', 3)), /too few/);
 });
 
 function mockFetch(handler) {
@@ -80,60 +85,73 @@ function mockFetch(handler) {
   globalThis.fetch = async (url) => handler(String(url));
   return () => (globalThis.fetch = real);
 }
-const ok = (body, type = 'application/json') => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status: 200, headers: { 'content-type': type } });
+const ok = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+const bySym = (url) => /\/(?:quotes|historical)\/([^/.]+)\.json/.exec(url)?.[1];
 
-test('run(): full happy path writes live.json and history.json', async () => {
-  const now = Math.floor(Date.now() / 1000);
-  const restore = mockFetch((url) => {
-    if (url.includes('range=max')) return ok(yahooJson({ n: 2500, stepSec: 86_400, endTs: now, base: 3000 }));
-    if (url.includes('range=1mo')) return ok(yahooJson({ n: 21, stepSec: 86_400, endTs: now }));
-    if (url.includes('interval=5m')) return ok(yahooJson({ n: 78, stepSec: 300, endTs: now }));
-    if (url.includes('interval=15m')) return ok(yahooJson({ n: 130, stepSec: 900, endTs: now }));
+function happyHandler({ date = '2026-10-02', failHistory = [], failQuote = [] } = {}) {
+  return (url) => {
+    const sym = bySym(url);
+    if (url.includes('/charts/historical/')) return failHistory.includes(sym) ? new Response('no', { status: 403 }) : ok(historyJson({ to: '2026-10-02' }));
+    if (url.includes('/charts/intraday/')) return ok(intradayJson(date));
+    if (url.includes('/quotes/')) return failQuote.includes(sym) ? new Response('boom', { status: 500 }) : ok(quoteJson(sym === '_DJX' ? 511.77 : 7722.7202, sym === '_DJX' ? 2.5 : 56.2702, 0.7286));
     return new Response('nope', { status: 404 });
-  });
+  };
+}
+
+test('run(): happy path writes live, history and sessions; Dow is scaled; Nasdaq-100 has no sparkline', async () => {
+  const restore = mockFetch(happyHandler({ failHistory: ['_NDX'] }));
   try {
     const dir = await mkdtemp(join(tmpdir(), 'md-'));
     const { changed } = await run(dir, silent);
     assert.equal(changed, true);
     const live = JSON.parse(await readFile(join(dir, 'live.json'), 'utf8'));
     const hist = JSON.parse(await readFile(join(dir, 'history.json'), 'utf8'));
+    const sess = JSON.parse(await readFile(join(dir, 'sessions.json'), 'utf8'));
+    assert.equal(hist.symbol, '^SPX');
     assert.equal(hist.d.length, hist.c.length);
-    assert.ok(hist.c.length >= 1000);
-    assert.ok(live.quotes.length >= 10);
+    assert.ok(hist.c.length > 12_000);
+    assert.equal(live.quotes.length, SYMBOLS.length);
     assert.equal(live.quotes[0].id, 'spx');
-    assert.ok(live.spx.intraday.c.length > 10 && live.spx.week.c.length > 10);
+    assert.equal(live.quotes.find((q) => q.id === 'dji').price, 51177);
+    assert.equal(live.quotes.find((q) => q.id === 'vix').invert, true);
+    assert.equal(live.quotes.find((q) => q.id === 'ndx').spark.length, 0);
+    assert.equal(live.quotes[0].spark.length, 30);
+    assert.equal(live.spx.intraday.t.length, 389);
     assert.ok(live.spx.session.end > live.spx.session.start);
-    // second run: history is fresh, live data identical -> no change
+    assert.ok(sess.sessions['2026-10-02']);
     const again = await run(dir, silent);
-    assert.equal(again.changed, false);
+    assert.equal(again.changed, false, 'second run with identical data must not republish');
   } finally { restore(); }
 });
 
-test('run(): Yahoo down -> history falls back to Stooq and S&P quote is derived (end-of-day)', async () => {
-  const lines = ['Date,Open,High,Low,Close,Volume'];
-  const today = Math.floor(Date.now() / 86_400_000);
-  for (let i = 1600; i >= 0; i--) {
-    const d = new Date((today - i) * 86_400_000).toISOString().slice(0, 10);
-    const c = (3000 + (1600 - i) * 0.9).toFixed(2);
-    lines.push(`${d},${c},${c},${c},${c},1`);
-  }
-  const restore = mockFetch((url) => {
-    if (url.includes('yahoo')) return new Response('forbidden', { status: 403 });
-    if (url.includes('stooq')) return ok(lines.join('\n'), 'text/csv');
-    return new Response('nope', { status: 404 });
-  });
+test('run(): a failing quote keeps the previously known value; first-run failure just omits it', async () => {
+  let restore = mockFetch(happyHandler());
+  const dir = await mkdtemp(join(tmpdir(), 'md-'));
+  try { await run(dir, silent); } finally { restore(); }
+  restore = mockFetch(happyHandler({ failQuote: ['GLD', '_RUT'] }));
   try {
-    const dir = await mkdtemp(join(tmpdir(), 'md-'));
-    const { changed } = await run(dir, silent);
-    assert.equal(changed, true);
-    const hist = JSON.parse(await readFile(join(dir, 'history.json'), 'utf8'));
+    const { failures } = await run(dir, silent);
+    assert.equal(failures, 2);
     const live = JSON.parse(await readFile(join(dir, 'live.json'), 'utf8'));
-    assert.equal(hist.source, 'stooq');
-    assert.equal(live.source, 'stooq');
-    assert.equal(live.quotes.length, 1);
-    assert.equal(live.quotes[0].id, 'spx');
-    assert.equal(live.spx, null);
+    assert.equal(live.quotes.length, SYMBOLS.length, 'previous GLD / RUT entries preserved');
   } finally { restore(); }
+  restore = mockFetch(happyHandler({ failQuote: ['GLD'] }));
+  try {
+    const fresh = await mkdtemp(join(tmpdir(), 'md-'));
+    await run(fresh, silent);
+    const live = JSON.parse(await readFile(join(fresh, 'live.json'), 'utf8'));
+    assert.equal(live.quotes.length, SYMBOLS.length - 1);
+  } finally { restore(); }
+});
+
+test('run(): sessions accumulate across days and are capped', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'md-'));
+  for (const date of ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06']) {
+    const restore = mockFetch(happyHandler({ date }));
+    try { await run(dir, silent); } finally { restore(); }
+  }
+  const sess = JSON.parse(await readFile(join(dir, 'sessions.json'), 'utf8'));
+  assert.deepEqual(Object.keys(sess.sessions), ['2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06']);
 });
 
 test('run(): everything down and nothing cached -> fails loudly instead of writing fake data', async () => {
