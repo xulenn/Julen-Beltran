@@ -299,7 +299,9 @@
     let lastNarrow = $('lab-hold').clientWidth < 560;
     new ResizeObserver(() => { const nw = $('lab-hold').clientWidth < 560; if (nw !== lastNarrow) { lastNarrow = nw; renderHolding(); } }).observe($('lab-hold'));
   }
-  if (window.JB && window.JB.history) start();
-  document.addEventListener('jb:history', start);
+  // computing 50 years of rolling windows is cheap on a laptop but not on a throttled phone: wait until the section is near
+  const startWhenNear = () => { const near = window.JB && window.JB.whenNear; const host = document.getElementById('lab'); if (near && host) near(host, start); else start(); };
+  if (window.JB && window.JB.history) startWhenNear();
+  document.addEventListener('jb:history', startWhenNear, { once: true });
   document.addEventListener('jb:market-error', () => { if (!started) $('lab-wait').textContent = "The risk lab needs the daily market history, which couldn't be loaded right now. The rest of the page works fine without it."; });
 })();

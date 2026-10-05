@@ -26,11 +26,17 @@ Instead:
 
 1. `.github/workflows/market-data.yml` runs every ~10 minutes while US markets are open (and once after the close).
 2. It runs `scripts/market-data.mjs`, which reads Cboe's public delayed-quote JSON and writes
-   `live.json`, `history.json` and `sessions.json`.
+   `live.json`, `history.json` (S&P 500), `sessions.json` and one `hist-<id>.json` per other asset in the ticker
+   (Dow, Russell 2000, VIX, gold, long Treasuries, bitcoin, eurozone, Spain).
 3. The files are force-pushed as a single commit to the **`data`** branch, so `main` history never grows and
    Pages is not rebuilt on every refresh.
 4. The page fetches them from `raw.githubusercontent.com/<repo>/data/…` (the URL is in the
    `market-data-base` meta tag in `index.html`).
+
+The chart can switch to any of those assets (each file is fetched only when picked) and **compare** any two on one
+rebased chart: both start at 0% on the first date they share, with their correlation, gap, drawdowns and volatility.
+Compare mode uses a validated blue/orange categorical pair; `live.json` lists which assets are switchable, so an
+older data file simply gives a plain S&P chart.
 
 Things worth knowing:
 
