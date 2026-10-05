@@ -94,7 +94,8 @@
     if (live.status === 'fulfilled' && validLive(live.value)) S.live = live.value;
     if (hist.status === 'fulfilled' && validHist(hist.value)) prepareHistory(hist.value);
     if (sess.status === 'fulfilled' && sess.value?.sessions) S.sess = sess.value;
-    if (!S.live && !S.hist) { setState('error'); return; }
+    if (!S.live && !S.hist) { setState('error'); document.dispatchEvent(new CustomEvent('jb:market-error')); return; }
+    if (!S.histRaw) document.dispatchEvent(new CustomEvent('jb:market-error')); // the risk lab needs the daily history
     S.synthetic = Boolean(S.live?.synthetic || S.hist?.synthetic);
     applyLive();
     if (first) { buildRanges(); initCalc(); }
@@ -108,6 +109,9 @@
     const c = Array.from(h.c);
     S.hist = h;
     S.histRaw = { d, c };
+    window.JB = window.JB || {};
+    window.JB.history = { d, c }; // the risk lab (lab.js) reads the same series
+    document.dispatchEvent(new CustomEvent('jb:history'));
   }
   function histArrays() {
     if (!S.histRaw) return null;

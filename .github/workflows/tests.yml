@@ -1,0 +1,25 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Market-data fetcher tests
+        run: node --test scripts/market-data.test.mjs
+      - name: Risk-lab maths tests
+        run: node --test scripts/risk-math.test.mjs
+      - name: JavaScript syntax check
+        run: for f in assets/js/*.js; do node --check "$f"; done
