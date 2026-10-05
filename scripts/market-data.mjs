@@ -3,74 +3,93 @@
 //
 //   node scripts/market-data.mjs <outDir>
 //
-// Writes two small JSON files into <outDir>:
-//   live.json     ticker quotes + S&P 500 intraday (1D / 5D) — refreshed on every run
-//   history.json  S&P 500 daily closes, full history     — refreshed at most once a day
+// Source: Cboe's public delayed-quote CDN (the JSON behind cboe.com's own quote pages).
+// It needs no API key and — unlike Yahoo, Stooq or FRED — answers requests from GitHub's
+// runners. Data is delayed ~15 minutes. Files written to <outDir>:
+//
+//   live.json      ticker quotes + the S&P 500's latest session at 1-minute resolution
+//   history.json   S&P 500 daily closes since 1975, plus 30-day sparklines for the ticker
+//   sessions.json  last few sessions at 5-minute resolution (feeds the 5-day view; Cboe only
+//                  serves the latest session, so this file accumulates day by day)
 //
 // The GitHub Action in .github/workflows/market-data.yml runs this on a schedule and
-// publishes <outDir> to the `data` branch, which the site reads. No API keys needed.
+// publishes <outDir> to the `data` branch, which the site reads.
 //
-// Principles: never write fabricated data, never replace good data with worse data.
-// If a source fails the previous file (if any) is kept and the page shows its real age.
+// Principles: never write fabricated data, never replace good data with worse data. If a
+// request fails, the previous value is kept and the page shows its real timestamp.
 
 import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+const BASE = 'https://cdn.cboe.com/api/global/delayed_quotes';
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-const YAHOO_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
 const HISTORY_MAX_AGE_H = 20;
+const KEEP_SESSIONS = 6;
 
+/** `scale` converts Cboe's value to the headline value (DJX is 1/100th of the Dow). */
 export const SYMBOLS = [
-  { id: 'spx', symbol: '^GSPC', name: 'S&P 500' },
-  { id: 'ndx', symbol: '^IXIC', name: 'Nasdaq' },
-  { id: 'dji', symbol: '^DJI', name: 'Dow Jones' },
-  { id: 'rut', symbol: '^RUT', name: 'Russell 2000' },
-  { id: 'ibex', symbol: '^IBEX', name: 'IBEX 35' },
-  { id: 'sx5e', symbol: '^STOXX50E', name: 'Euro Stoxx 50' },
-  { id: 'vix', symbol: '^VIX', name: 'VIX' },
-  { id: 'tnx', symbol: '^TNX', name: 'US 10Y', kind: 'yield' },
-  { id: 'eurusd', symbol: 'EURUSD=X', name: 'EUR/USD', digits: 4 },
-  { id: 'gold', symbol: 'GC=F', name: 'Gold' },
-  { id: 'btc', symbol: 'BTC-USD', name: 'Bitcoin' },
+  { id: 'spx', sym: '_SPX', name: 'S&P 500', digits: 2 },
+  { id: 'ndx', sym: '_NDX', name: 'Nasdaq-100', digits: 2, noHistory: true },
+  { id: 'dji', sym: '_DJX', name: 'Dow Jones', digits: 0, scale: 100 },
+  { id: 'rut', sym: '_RUT', name: 'Russell 2000', digits: 2 },
+  { id: 'vix', sym: '_VIX', name: 'VIX', digits: 2, invert: true },
+  { id: 'gld', sym: 'GLD', name: 'Gold · GLD', digits: 2 },
+  { id: 'tlt', sym: 'TLT', name: '20Y Treasuries · TLT', digits: 2 },
+  { id: 'ibit', sym: 'IBIT', name: 'Bitcoin · IBIT', digits: 2 },
+  { id: 'ezu', sym: 'EZU', name: 'Eurozone · EZU', digits: 2 },
+  { id: 'ewp', sym: 'EWP', name: 'Spain · EWP', digits: 2 },
 ];
 
-export const tuning = { retryMs: 800, politeMs: 150 }; // tests set these to 0
+export const tuning = { retryMs: 800, politeMs: 120 }; // tests set these to 0
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 const round = (x, d = 2) => (isNum(x) ? Math.round(x * 10 ** d) / 10 ** d : null);
+const dayNum = (y, m, d) => Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
+
+// ---------------------------------------------------------------- time (America/New_York)
+
+const NY = 'America/New_York';
+function tzOffsetMs(utcMs) {
+  const f = new Intl.DateTimeFormat('en-US', {
+    timeZone: NY, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+  });
+  const p = Object.fromEntries(f.formatToParts(new Date(utcMs)).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - utcMs;
+}
+
+/** 'YYYY-MM-DDTHH:MM:SS' wall-clock time in New York -> epoch seconds (DST-aware). */
+export function etToEpoch(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s));
+  if (!m) throw new Error(`Bad ET timestamp: ${s}`);
+  const [Y, M, D, h, mi] = m.slice(1, 6).map(Number);
+  const sec = Number(m[6] || 0);
+  const wall = Date.UTC(Y, M - 1, D, h, mi, sec);
+  let guess = wall - tzOffsetMs(wall);
+  guess = wall - tzOffsetMs(guess); // second pass settles the DST edge cases
+  return Math.floor(guess / 1000);
+}
 
 // ---------------------------------------------------------------- HTTP
 
-async function getText(url, { tries = 3, accept = '*/*' } = {}) {
+async function getJson(path, { tries = 3 } = {}) {
+  const url = `${BASE}/${path}`;
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
       const res = await fetch(url, {
-        headers: { 'user-agent': UA, accept, 'accept-language': 'en-US,en;q=0.9' },
-        signal: AbortSignal.timeout(25_000),
+        headers: { 'user-agent': UA, accept: 'application/json' },
+        signal: AbortSignal.timeout(30_000),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-      return await res.text();
+      if (res.status === 403 || res.status === 404) throw Object.assign(new Error(`HTTP ${res.status} for ${path}`), { fatal: true });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+      return await res.json();
     } catch (err) {
       lastErr = err;
+      if (err.fatal) break;
       await sleep(tuning.retryMs * (i + 1));
-    }
-  }
-  throw lastErr;
-}
-
-async function yahooChart(symbol, range, interval) {
-  let lastErr;
-  for (const host of YAHOO_HOSTS) {
-    const url =
-      `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}` +
-      `?range=${range}&interval=${interval}&includePrePost=false&events=div%7Csplit`;
-    try {
-      return parseYahooChart(JSON.parse(await getText(url, { accept: 'application/json', tries: 2 })));
-    } catch (err) {
-      lastErr = err;
     }
   }
   throw lastErr;
@@ -78,145 +97,88 @@ async function yahooChart(symbol, range, interval) {
 
 // ---------------------------------------------------------------- parsers (pure, unit-tested)
 
-/** Yahoo v8 chart JSON -> { meta, t: epoch seconds[], c: closes[] } with null closes dropped. */
-export function parseYahooChart(json) {
-  const err = json?.chart?.error;
-  if (err) throw new Error(`Yahoo error: ${err.code || ''} ${err.description || ''}`);
-  const r = json?.chart?.result?.[0];
-  if (!r || !Array.isArray(r.timestamp) || !r.indicators?.quote?.[0]?.close) {
-    throw new Error('Yahoo response has no price series');
+/** historical/<sym>.json -> { d: day numbers[], c: closes[] } (ascending, positive closes only) */
+export function parseHistory(json) {
+  const rows = json?.data;
+  if (!Array.isArray(rows) || !rows.length) throw new Error('History response has no rows');
+  const d = [];
+  const c = [];
+  for (const r of rows) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(r?.date ?? '');
+    const close = Number(r?.close);
+    if (!m || !Number.isFinite(close) || close <= 0) continue;
+    const day = dayNum(+m[1], +m[2], +m[3]);
+    if (d.length && day <= d[d.length - 1]) continue;
+    d.push(day);
+    c.push(close);
   }
-  const closes = r.indicators.quote[0].close;
+  if (!c.length) throw new Error('History has no usable closes');
+  return { d, c, upstream: json.timestamp ?? null };
+}
+
+/** quotes/<sym>.json -> { price, change, pct, prev, time }. The options chain is ignored. */
+export function parseQuote(json) {
+  const q = json?.data;
+  const price = Number(q?.current_price);
+  const change = Number(q?.price_change);
+  const pct = Number(q?.price_change_percent);
+  if (!q || !Number.isFinite(price) || price <= 0 || !Number.isFinite(change) || !Number.isFinite(pct)) {
+    throw new Error('Quote response is missing price fields');
+  }
+  // `prev_day_close` is overwritten with today's close after the bell, so derive the
+  // reference close from the change instead.
+  return { price, change, pct, prev: price - change, time: etToEpoch(q.last_trade_time) };
+}
+
+/** intraday/<sym>.json -> { date, t: epoch s[], c: closes[] } for the most recent session only. */
+export function parseIntraday(json) {
+  const rows = json?.data;
+  if (!Array.isArray(rows) || !rows.length) throw new Error('Intraday response has no rows');
+  const latest = rows.reduce((a, r) => (r.datetime > a ? r.datetime : a), '').slice(0, 10);
   const t = [];
   const c = [];
-  for (let i = 0; i < r.timestamp.length; i++) {
-    if (isNum(closes[i]) && closes[i] > 0 && isNum(r.timestamp[i])) {
-      t.push(r.timestamp[i]);
-      c.push(closes[i]);
-    }
+  for (const r of rows) {
+    if (!r.datetime?.startsWith(latest)) continue;
+    const close = Number(r.price?.close);
+    if (!Number.isFinite(close) || close <= 0) continue;
+    const ts = etToEpoch(r.datetime);
+    if (t.length && ts <= t[t.length - 1]) continue;
+    t.push(ts);
+    c.push(close);
   }
-  if (!c.length) throw new Error('Yahoo series is empty');
-  return { meta: r.meta || {}, t, c };
+  if (t.length < 10) throw new Error(`Intraday session ${latest} has too few bars (${t.length})`);
+  return { date: latest, t, c };
 }
 
-const dayOf = (ms) => Math.floor(ms / 86_400_000);
-
-/** CSV (Stooq: Date,Open,High,Low,Close,Volume | FRED: DATE,SP500) -> { d: day numbers[], c: closes[] } */
-export function parseCsvSeries(text, closeCol) {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2 || !/date/i.test(lines[0])) throw new Error('Not a CSV price file');
-  const d = [];
-  const c = [];
-  for (const line of lines.slice(1)) {
-    const cols = line.split(',');
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(cols[0]);
-    const v = Number(cols[closeCol]);
-    if (!m || !Number.isFinite(v) || v <= 0) continue; // FRED uses "." for holidays
-    d.push(dayOf(Date.UTC(+m[1], +m[2] - 1, +m[3])));
-    c.push(v);
-  }
-  return { d, c };
-}
-
-/** Build one ticker quote from a short daily Yahoo series. */
-export function buildQuote(def, chart) {
-  const { meta, t } = chart;
-  let { c } = chart;
-  let price = isNum(meta.regularMarketPrice) ? meta.regularMarketPrice : c[c.length - 1];
-  // ^TNX has historically been quoted as yield x10; normalise to percent.
-  const scale = def.kind === 'yield' && price > 20 ? 0.1 : 1;
-  price *= scale;
-  c = c.map((x) => x * scale);
-
-  const time = isNum(meta.regularMarketTime) ? meta.regularMarketTime : t[t.length - 1];
-  const off = isNum(meta.gmtoffset) ? meta.gmtoffset : 0;
-  const dayKey = (ts) => Math.floor((ts + off) / 86_400);
-  const today = dayKey(time);
-  let prev = null;
-  for (let i = t.length - 1; i >= 0; i--) {
-    if (dayKey(t[i]) < today) {
-      prev = c[i];
-      break;
+/** Keep one point per 5 minutes (plus the last) to keep archived sessions small. */
+export function downsample5(t, c) {
+  const ot = [];
+  const oc = [];
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] % 300 === 0 || i === t.length - 1 || i === 0) {
+      ot.push(t[i]);
+      oc.push(round(c[i], 2));
     }
   }
-  if (prev == null) prev = (meta.chartPreviousClose ?? meta.previousClose ?? c[0]) * scale;
+  return { t: ot, c: oc };
+}
+
+export function buildQuote(def, q, spark) {
+  const k = def.scale ?? 1;
   const digits = def.digits ?? 2;
-  const spark = c.slice(-30);
   return {
     id: def.id,
-    symbol: def.symbol,
+    symbol: def.sym.replace('_', '^'),
     name: def.name,
-    kind: def.kind || 'price',
-    price: round(price, digits),
-    prev: round(prev, digits),
-    change: round(price - prev, digits),
-    pct: round(((price - prev) / prev) * 100, 3),
-    time,
-    spark: spark.map((x) => round(x, digits)),
+    price: round(q.price * k, digits),
+    prev: round(q.prev * k, digits),
+    change: round(q.change * k, digits),
+    pct: round(q.pct, 3),
+    time: q.time,
     digits,
+    ...(def.invert ? { invert: true } : {}),
+    spark: (spark || []).map((x) => round(x * k, digits)),
   };
-}
-
-function series(chart, digits = 2) {
-  return { t: chart.t, c: chart.c.map((x) => round(x, digits)) };
-}
-
-function validateHistory(h, source) {
-  if (!h || h.c.length < 1000) throw new Error(`${source}: history too short (${h?.c.length ?? 0})`);
-  const ageDays = Date.now() / 86_400_000 - h.d[h.d.length - 1];
-  if (ageDays > 12) throw new Error(`${source}: history is stale (${ageDays.toFixed(0)} days old)`);
-  for (let i = 1; i < h.d.length; i++) {
-    if (h.d[i] <= h.d[i - 1]) throw new Error(`${source}: dates not increasing at index ${i}`);
-  }
-  return h;
-}
-
-// ---------------------------------------------------------------- sources
-
-async function historyFromYahoo() {
-  const ch = await yahooChart('^GSPC', 'max', '1d');
-  const d = [];
-  const c = [];
-  for (let i = 0; i < ch.t.length; i++) {
-    const day = dayOf(ch.t[i] * 1000);
-    if (d.length && day <= d[d.length - 1]) {
-      c[c.length - 1] = ch.c[i]; // same day twice (live bar): keep the latest
-      continue;
-    }
-    d.push(day);
-    c.push(ch.c[i]);
-  }
-  return validateHistory({ d, c: c.map((x) => round(x, 2)) }, 'yahoo');
-}
-
-async function historyFromStooq() {
-  const text = await getText('https://stooq.com/q/d/l/?s=%5Espx&i=d');
-  const h = parseCsvSeries(text, 4);
-  return validateHistory({ d: h.d, c: h.c.map((x) => round(x, 2)) }, 'stooq');
-}
-
-async function historyFromFred() {
-  const text = await getText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500');
-  const h = parseCsvSeries(text, 1);
-  return validateHistory({ d: h.d, c: h.c.map((x) => round(x, 2)) }, 'fred');
-}
-
-async function fetchHistory(log) {
-  const sources = [
-    ['yahoo', historyFromYahoo],
-    ['stooq', historyFromStooq],
-    ['fred', historyFromFred],
-  ];
-  for (const [name, fn] of sources) {
-    try {
-      const h = await fn();
-      log(`history: ${name} ok (${h.c.length} points, last close ${h.c[h.c.length - 1]})`);
-      return { source: name, ...h };
-    } catch (err) {
-      log(`history: ${name} failed — ${err.message}`);
-    }
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------- main
@@ -228,111 +190,106 @@ async function readJson(path) {
     return null;
   }
 }
-
-const stable = (o) => JSON.stringify(o, (k, v) => (k === 'generated' ? undefined : v));
+const stable = (o) => JSON.stringify(o, (key, v) => (key === 'generated' ? undefined : v));
 
 export async function run(outDir, log = console.log) {
   await mkdir(outDir, { recursive: true });
   const prevLive = await readJson(join(outDir, 'live.json'));
   const prevHist = await readJson(join(outDir, 'history.json'));
+  const prevSess = await readJson(join(outDir, 'sessions.json'));
   const now = new Date();
+  const nowSec = Math.floor(now / 1000);
   let changed = false;
+  let failures = 0;
 
-  // ---- history (S&P 500 daily) — at most once a day, or when missing
+  // ---- daily history (S&P 500) + sparklines — at most once a day
   let hist = prevHist;
-  const histAgeH = prevHist ? (now - new Date(prevHist.generated)) / 3_600_000 : Infinity;
-  if (!prevHist || histAgeH > HISTORY_MAX_AGE_H || process.env.FORCE_HISTORY) {
-    const fresh = await fetchHistory(log);
-    if (fresh) {
-      hist = {
-        v: 1,
-        symbol: '^GSPC',
-        name: 'S&P 500',
-        source: fresh.source,
-        generated: now.toISOString(),
-        d: fresh.d,
-        c: fresh.c,
-      };
-      // Never replace a longer history with a shorter one from a fallback source.
-      if (prevHist && prevHist.d.length > hist.d.length + 50) {
-        log(`history: keeping previous (${prevHist.d.length} pts) over ${hist.source} (${hist.d.length} pts)`);
-        hist = prevHist;
-      } else {
-        // Always persist a fresh pull (it carries the new `generated` stamp that gates the
-        // next refresh); this happens at most once a day, so publishing it is cheap.
-        await writeFile(join(outDir, 'history.json'), JSON.stringify(hist));
-        changed = true;
+  const age = prevHist ? (now - new Date(prevHist.generated)) / 3_600_000 : Infinity;
+  if (!prevHist || age > HISTORY_MAX_AGE_H || process.env.FORCE_HISTORY) {
+    try {
+      const h = parseHistory(await getJson('charts/historical/_SPX.json'));
+      const sparks = { ...(prevHist?.sparks || {}) };
+      for (const def of SYMBOLS) {
+        if (def.noHistory) continue;
+        try {
+          const s = def.id === 'spx' ? h : parseHistory(await getJson(`charts/historical/${def.sym}.json`));
+          sparks[def.id] = s.c.slice(-30).map((x) => round(x, 4));
+        } catch (err) {
+          log(`sparkline ${def.sym}: ${err.message}`);
+        }
+        await sleep(tuning.politeMs);
       }
+      hist = { v: 1, symbol: '^SPX', name: 'S&P 500', source: 'cboe', generated: now.toISOString(), upstream: h.upstream, d: h.d, c: h.c.map((x) => round(x, 2)), sparks };
+      await writeFile(join(outDir, 'history.json'), JSON.stringify(hist));
+      changed = true; // a fresh pull carries the `generated` stamp that gates the next one
+      log(`history: ${h.c.length} daily closes, ${h.d.length ? new Date(h.d[0] * 86_400_000).toISOString().slice(0, 10) : '?'} → last ${h.c[h.c.length - 1]}`);
+    } catch (err) {
+      failures++;
+      log(`history: failed — ${err.message}${prevHist ? ' (keeping previous)' : ''}`);
     }
   } else {
-    log(`history: fresh enough (${histAgeH.toFixed(1)} h old), skipping`);
+    log(`history: fresh enough (${age.toFixed(1)} h old)`);
   }
 
-  // ---- live quotes
+  // ---- quotes
   const quotes = [];
-  let source = 'yahoo';
   for (const def of SYMBOLS) {
     try {
-      const ch = await yahooChart(def.symbol, '1mo', '1d');
-      quotes.push(buildQuote(def, ch));
-      log(`quote: ${def.symbol} ${quotes[quotes.length - 1].price}`);
+      const q = parseQuote(await getJson(`quotes/${def.sym}.json`));
+      const spark = hist?.sparks?.[def.id] ?? prevLive?.quotes?.find((x) => x.id === def.id)?.spark?.map((x) => x / (def.scale ?? 1));
+      quotes.push(buildQuote(def, q, spark));
     } catch (err) {
-      log(`quote: ${def.symbol} failed — ${err.message}`);
-      const old = prevLive?.quotes?.find((q) => q.id === def.id);
-      if (old) quotes.push(old); // keep last known, with its own (real) timestamp
+      failures++;
+      log(`quote ${def.sym}: failed — ${err.message}`);
+      const old = prevLive?.quotes?.find((x) => x.id === def.id);
+      if (old) quotes.push(old);
     }
     await sleep(tuning.politeMs);
   }
+  log(`quotes: ${quotes.length}/${SYMBOLS.length}${quotes[0] ? `, S&P 500 ${quotes.find((x) => x.id === 'spx')?.price}` : ''}`);
 
-  // ---- S&P 500 intraday
-  let spx = prevLive?.spx || null;
+  // ---- S&P 500 latest session
+  let spx = prevLive?.spx ?? null;
+  const sessions = { ...(prevSess?.sessions || {}) };
   try {
-    const day = await yahooChart('^GSPC', '1d', '5m');
-    const week = await yahooChart('^GSPC', '5d', '15m');
-    const m = day.meta;
-    const reg = m.currentTradingPeriod?.regular;
+    const day = parseIntraday(await getJson('charts/intraday/_SPX.json'));
+    const open = etToEpoch(`${day.date}T09:30:00`);
+    const close = etToEpoch(`${day.date}T16:00:00`);
+    const last = day.t[day.t.length - 1];
+    const inProgress = nowSec - last < 1800 && nowSec < close + 1800;
+    const spxQuote = quotes.find((x) => x.id === 'spx');
     spx = {
-      session: reg ? { start: reg.start, end: reg.end } : null,
-      dayHigh: round(m.regularMarketDayHigh),
-      dayLow: round(m.regularMarketDayLow),
-      high52: round(m.fiftyTwoWeekHigh),
-      low52: round(m.fiftyTwoWeekLow),
-      intraday: series(day),
-      week: series(week),
+      date: day.date,
+      session: { start: open, end: inProgress ? close : Math.max(last + 60, open + 3600) },
+      prev: spxQuote ? spxQuote.prev : null,
+      intraday: { t: day.t, c: day.c.map((x) => round(x, 2)) },
     };
-    log(`intraday: ${day.c.length} x 5m, ${week.c.length} x 15m`);
+    sessions[day.date] = downsample5(day.t, day.c);
+    log(`intraday: ${day.date}, ${day.t.length} one-minute bars`);
   } catch (err) {
+    failures++;
     log(`intraday: failed — ${err.message}`);
   }
-
-  // ---- if Yahoo gave us nothing for the S&P but we have history, derive an end-of-day quote
-  if (!quotes.some((q) => q.id === 'spx') && hist && hist.c.length > 2) {
-    const n = hist.c.length;
-    const price = hist.c[n - 1];
-    const prev = hist.c[n - 2];
-    quotes.unshift({
-      id: 'spx', symbol: '^GSPC', name: 'S&P 500', kind: 'price',
-      price, prev, change: round(price - prev), pct: round(((price - prev) / prev) * 100, 3),
-      time: Math.floor(hist.d[n - 1] * 86_400 + 21 * 3600), // ~close, informational only
-      spark: hist.c.slice(-30), digits: 2,
-    });
-    source = hist.source;
+  const keep = Object.keys(sessions).sort().slice(-KEEP_SESSIONS);
+  const sessOut = { v: 1, generated: now.toISOString(), sessions: Object.fromEntries(keep.map((k) => [k, sessions[k]])) };
+  if (stable(prevSess) !== stable(sessOut) && keep.length) {
+    await writeFile(join(outDir, 'sessions.json'), JSON.stringify(sessOut));
+    changed = true;
   }
 
-  if (!quotes.length && !hist) throw new Error('No market data could be fetched from any source');
+  if (!quotes.length && !hist) throw new Error('No market data could be fetched');
 
-  const live = { v: 1, generated: now.toISOString(), source, quotes, spx };
+  const live = { v: 1, generated: now.toISOString(), source: 'cboe', quotes, spx };
   if (stable(prevLive) !== stable(live)) {
     await writeFile(join(outDir, 'live.json'), JSON.stringify(live));
     changed = true;
   }
-  log(changed ? 'result: data changed' : 'result: no change');
-  return { changed };
+  log(changed ? `result: data changed (${failures} request failure${failures === 1 ? '' : 's'})` : 'result: no change');
+  return { changed, failures };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const out = process.argv[2] || 'out';
-  run(out)
+  run(process.argv[2] || 'out')
     .then(async ({ changed }) => {
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `changed=${changed}\n`);
     })
