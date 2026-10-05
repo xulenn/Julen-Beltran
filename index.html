@@ -193,13 +193,16 @@
       <p class="kicker reveal"><span>02</span> Markets</p>
       <div class="markets-head">
         <h2 class="display reveal" id="markets-title">The S&amp;P&nbsp;500, <em>live</em>.</h2>
-        <p class="markets-sub reveal">I like finance, so I built this. A scheduled GitHub Action pulls prices every few minutes while Wall Street is open, and the chart is hand-written canvas — no chart library. Scrub it with your mouse, finger or arrow keys.</p>
+        <p class="markets-sub reveal">I like finance, so I built this. A scheduled GitHub Action pulls prices every few minutes while Wall Street is open, and the chart is hand-written canvas — no chart library. Scrub it with your mouse, finger or arrow keys, switch to another asset, or compare two.</p>
       </div>
 
       <div class="mk" id="mk" data-state="loading">
         <div class="mk-head">
           <div class="mk-quote">
-            <p class="mk-name"><span>S&amp;P 500</span><span class="pill" id="mk-state" hidden></span></p>
+            <div class="mk-name">
+              <label class="asset-pick"><span class="sr-only">Asset shown in the chart</span><select id="mk-asset"><option value="spx">S&amp;P 500</option></select></label>
+              <span class="pill" id="mk-state" hidden></span>
+            </div>
             <p class="mk-price" id="mk-price" aria-live="off">—</p>
             <p class="mk-delta" id="mk-delta"></p>
             <p class="mk-asof" id="mk-asof">Loading market data…</p>
@@ -211,13 +214,16 @@
               <button type="button" role="radio" aria-checked="false" data-mode="pct">% change</button>
               <button type="button" role="radio" aria-checked="false" data-mode="dd">Drawdown</button>
             </div>
+            <div class="cmp-pick" id="mk-cmp-wrap" hidden><label for="mk-cmp">Compared with</label><select id="mk-cmp"></select></div>
             <div class="seg seg-toggles">
+              <button type="button" id="mk-cmp-btn" aria-pressed="false" hidden>Compare</button>
               <button type="button" id="mk-log" aria-pressed="false">Log</button>
               <button type="button" id="mk-table-btn" aria-pressed="false" aria-controls="mk-table-wrap">Table</button>
             </div>
           </div>
         </div>
 
+        <ul class="mk-legend" id="mk-legend" hidden aria-label="Chart legend"></ul>
         <div class="mk-chart" id="mk-chart">
           <canvas id="mk-canvas" tabindex="0" role="img" aria-label="S&P 500 price chart. Use the left and right arrow keys to read values."></canvas>
           <div class="mk-tip" id="mk-tip" role="presentation" hidden></div>

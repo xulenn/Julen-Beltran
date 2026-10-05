@@ -24,6 +24,8 @@
     ref: 'rgba(239,233,221,.28)',
     up: '#5fd0a0',
     down: '#f08a6b',
+    s1: '#3987e5', // compare mode: categorical slots 1 and 2, validated for this surface
+    s2: '#d95926',
   };
   const MONO = '500 11px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
   const SANS = '600 12px Inter, system-ui, sans-serif';
@@ -71,10 +73,12 @@
     live: $('#mk-live'), stats: $('#mk-stats'),
     calc: $('#calc'), amount: $('#calc-amount'), year: $('#calc-year'), cres: $('#calc-result'), ccanvas: $('#calc-canvas'),
     ticker: $('#ticker'), track: $('#ticker-track'), mini: $('#mini-market'),
+    asset: $('#mk-asset'), cmpBtn: $('#mk-cmp-btn'), cmpWrap: $('#mk-cmp-wrap'), cmpSel: $('#mk-cmp'), legend: $('#mk-legend'),
   };
   const ctx = E.canvas.getContext('2d');
   const S = {
     live: null, hist: null, sess: null,
+    sym: 'spx', cmp: null, hists: {}, prevMode: 'price', prevLog: false,
     range: '1Y', mode: 'price', log: false,
     view: null, hover: -1, progress: 1, anim: 0, dpr: 1, w: 0, h: 0, geo: null,
   };
@@ -98,6 +102,7 @@
     if (!S.histRaw) document.dispatchEvent(new CustomEvent('jb:market-error')); // the risk lab needs the daily history
     S.synthetic = Boolean(S.live?.synthetic || S.hist?.synthetic);
     applyLive();
+    buildAssets();
     if (first) { buildRanges(); initCalc(); }
     setState('ready');
     redraw(true);
@@ -109,14 +114,17 @@
     const c = Array.from(h.c);
     S.hist = h;
     S.histRaw = { d, c };
+    S.hists.spx = S.histRaw;
     window.JB = window.JB || {};
     window.JB.history = { d, c }; // the risk lab (lab.js) reads the same series
     document.dispatchEvent(new CustomEvent('jb:history'));
   }
-  function histArrays() {
-    if (!S.histRaw) return null;
-    const { d, c } = S.histRaw;
-    const q = spxQuote();
+  /** Daily series for an asset as typed arrays, with today's live price appended when the nightly history lags. */
+  function histArrays(id = S.sym) {
+    const raw = S.hists[id];
+    if (!raw) return null;
+    const { d, c } = raw;
+    const q = quote(id);
     let dd = d, cc = c;
     if (q && q.time) {
       const qDay = nyDayNumber(q.time * 1000);
@@ -128,7 +136,22 @@
     for (let i = 0; i < dd.length; i++) { xs[i] = dd[i] * DAY; ys[i] = cc[i]; }
     return { d: dd, xs, ys };
   }
-  const spxQuote = () => S.live?.quotes?.find((q) => q.id === 'spx') || null;
+  const quote = (id) => S.live?.quotes?.find((q) => q.id === id) || null;
+  const spxQuote = () => quote('spx');
+  const symName = (id) => quote(id)?.name || (id === 'spx' ? 'S&P 500' : id);
+  const symDigits = (id) => quote(id)?.digits ?? 2;
+  const fmtSym = (id, v) => nf(symDigits(id)).format(v);
+
+  /** The S&P 500 history ships with the page data; every other asset is fetched the first time it is picked. */
+  async function ensureHist(id) {
+    if (S.hists[id]) return true;
+    try {
+      const h = await fetchJSON(`hist-${id}.json`);
+      if (!validHist(h)) return false;
+      S.hists[id] = { d: Array.from(h.d), c: Array.from(h.c) };
+      return true;
+    } catch (e) { return false; }
+  }
 
   function setState(st) {
     root.dataset.state = st;
@@ -149,8 +172,8 @@
   }
 
   function applyLive() {
-    const q = spxQuote();
-    const hist = S.histRaw;
+    const q = quote(S.sym);
+    const hist = S.hists[S.sym];
     let price = q?.price;
     let change = q?.change;
     let pct = q?.pct;
@@ -163,13 +186,13 @@
       when = hist.d[n - 1] * DAY;
     }
     if (price == null) return;
-    E.price.textContent = fmtPrice(price);
+    E.price.textContent = fmtSym(S.sym, price);
     const open = isOpenNow(q);
     const dir = change > 0 ? 'up' : change < 0 ? 'down' : '';
     E.delta.replaceChildren();
     const main = document.createElement('span');
     main.className = dir;
-    main.textContent = `${change > 0 ? '▲' : change < 0 ? '▼' : '•'} ${fmtDelta(change)} (${fmtPct(pct, 2)})`;
+    main.textContent = `${change > 0 ? '▲' : change < 0 ? '▼' : '•'} ${fmtDelta(change, symDigits(S.sym))} (${fmtPct(pct, 2)})`;
     const lbl = document.createElement('span');
     lbl.className = 'lbl';
     lbl.textContent = open ? 'today' : 'last session';
@@ -188,7 +211,7 @@
     if (!S.synthetic && !open && ageDays > 4) parts.push(`⚠ last data is ${Math.round(ageDays)} days old`);
     E.asof.textContent = parts.join(' · ');
 
-    renderMini(q);
+    renderMini(spxQuote());
     renderTicker();
   }
 
@@ -277,15 +300,16 @@
   ];
   const sessionDates = () => Object.keys(S.sess?.sessions || {}).sort();
   const available = (r) => {
-    if (r.need === 'intraday') return Boolean(S.live?.spx?.intraday?.t?.length > 10 && S.live?.spx?.session);
-    if (r.need === 'week') return sessionDates().length >= 2;
-    return Boolean(S.histRaw);
+    const spxOnly = S.sym === 'spx' && !S.cmp; // intraday data exists for the S&P 500 only
+    if (r.need === 'intraday') return spxOnly && Boolean(S.live?.spx?.intraday?.t?.length > 10 && S.live?.spx?.session);
+    if (r.need === 'week') return spxOnly && sessionDates().length >= 2;
+    return Boolean(S.hists[S.sym]) && (!S.cmp || Boolean(S.hists[S.cmp]));
   };
 
   function buildRanges() {
     E.ranges.replaceChildren();
     const defs = RANGE_DEFS.filter(available);
-    if (!defs.some((r) => r.id === S.range)) S.range = defs.some((r) => r.id === '1Y') ? '1Y' : defs[0]?.id;
+    if (!defs.some((r) => r.id === S.range)) S.range = defs.some((r) => r.id === '1Y') ? '1Y' : defs[defs.length - 1]?.id;
     defs.forEach((r) => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -321,8 +345,8 @@
     });
   }
   radioGroup(E.ranges, 'range', (id) => { S.range = id; syncRadios(E.ranges, 'range', id); redraw(true); });
-  radioGroup(E.modes, 'mode', (id) => { S.mode = id; syncRadios(E.modes, 'mode', id); syncLogBtn(); redraw(true); });
-  E.logBtn.addEventListener('click', () => { if (S.mode !== 'price') return; S.log = !S.log; syncLogBtn(); redraw(true); });
+  radioGroup(E.modes, 'mode', (id) => { if (S.cmp) return; S.mode = id; syncRadios(E.modes, 'mode', id); syncLogBtn(); redraw(true); });
+  E.logBtn.addEventListener('click', () => { if (S.mode !== 'price' || S.cmp) return; S.log = !S.log; syncLogBtn(); redraw(true); });
   E.tableBtn.addEventListener('click', () => {
     const on = E.tableBtn.getAttribute('aria-pressed') !== 'true';
     E.tableBtn.setAttribute('aria-pressed', String(on));
@@ -330,12 +354,69 @@
     if (on) renderTable();
   });
   function syncLogBtn() {
-    const ok = S.mode === 'price';
+    const ok = S.mode === 'price' && !S.cmp;
     E.logBtn.setAttribute('aria-pressed', String(ok && S.log));
     E.logBtn.disabled = !ok;
     E.logBtn.style.opacity = ok ? '' : '.4';
   }
   syncLogBtn();
+
+  /* ---------- asset switcher + compare ---------- */
+  const histIds = () => (Array.isArray(S.live?.histories) && S.live.histories.length ? S.live.histories : ['spx']);
+  function buildAssets() {
+    const ids = histIds();
+    const fill = (sel, list, current) => {
+      sel.replaceChildren(...list.map((id) => { const o = document.createElement('option'); o.value = id; o.textContent = symName(id); return o; }));
+      if (list.includes(current)) sel.value = current;
+    };
+    fill(E.asset, ids, S.sym);
+    E.asset.disabled = ids.length < 2;
+    E.cmpBtn.hidden = ids.length < 2;
+    if (S.cmp && !ids.includes(S.cmp)) S.cmp = null;
+    fill(E.cmpSel, ids.filter((id) => id !== S.sym), S.cmp);
+    E.cmpWrap.hidden = !S.cmp;
+    E.cmpBtn.setAttribute('aria-pressed', String(Boolean(S.cmp)));
+    syncModeUI();
+  }
+  function syncModeUI() {
+    E.modes.querySelectorAll('button').forEach((b) => {
+      const locked = Boolean(S.cmp) && b.dataset.mode !== 'pct';
+      b.setAttribute('aria-disabled', String(locked));
+      b.disabled = locked;
+    });
+    syncRadios(E.modes, 'mode', S.mode);
+    syncLogBtn();
+  }
+  async function setSymbol(id) {
+    if (id === S.sym) return;
+    root.dataset.busy = '1';
+    if (!(await ensureHist(id))) { root.dataset.busy = ''; E.asset.value = S.sym; window.JB?.toast?.('That asset could not be loaded right now'); return; }
+    S.sym = id;
+    if (S.cmp === id) S.cmp = histIds().find((x) => x !== id) || null;
+    if (S.cmp && !(await ensureHist(S.cmp))) S.cmp = null;
+    buildAssets();
+    buildRanges();
+    applyLive();
+    redraw(true);
+  }
+  async function setCompare(id) {
+    if (id && !(await ensureHist(id))) { window.JB?.toast?.('That asset could not be loaded right now'); buildAssets(); return; }
+    const entering = id && !S.cmp;
+    const leaving = !id && S.cmp;
+    if (entering) { S.prevMode = S.mode; S.prevLog = S.log; S.mode = 'pct'; S.log = false; }
+    if (leaving) { S.mode = S.prevMode; S.log = S.prevLog; }
+    S.cmp = id || null;
+    buildAssets();
+    buildRanges();
+    redraw(true);
+  }
+  E.asset.addEventListener('change', () => setSymbol(E.asset.value));
+  E.cmpSel.addEventListener('change', () => setCompare(E.cmpSel.value));
+  E.cmpBtn.addEventListener('click', () => {
+    if (S.cmp) return setCompare(null);
+    const prefer = ['gld', 'ndx', 'vix', 'dji', 'tlt'].find((id) => id !== S.sym && histIds().includes(id));
+    return setCompare(prefer || histIds().find((id) => id !== S.sym));
+  });
 
   /* ---------- views (one per range) ---------- */
   const bsearchLE = (arr, v) => { let lo = 0, hi = arr.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= v) { r = m; lo = m + 1; } else hi = m - 1; } return r; };
@@ -345,25 +426,46 @@
     return Math.abs(xs[lo] - x) <= Math.abs(xs[hi] - x) ? lo : hi;
   };
 
+  /** Merge two daily series onto the dates both have a close for. */
+  function align(a, b) {
+    const d = [], ya = [], yb = [];
+    let j = 0;
+    for (let i = 0; i < a.d.length; i++) {
+      while (j < b.d.length && b.d[j] < a.d[i]) j++;
+      if (j >= b.d.length) break;
+      if (b.d[j] === a.d[i]) { d.push(a.d[i]); ya.push(a.ys[i]); yb.push(b.ys[j]); }
+    }
+    return { d, ya: Float64Array.from(ya), yb: Float64Array.from(yb) };
+  }
+
   function dailyView(range) {
-    const a = histArrays();
+    const a = histArrays(S.sym);
     if (!a) return null;
-    const n = a.d.length;
+    let d = a.d, ya = a.ys, yb = null;
+    if (S.cmp) {
+      const b = histArrays(S.cmp);
+      if (!b) return null;
+      const al = align(a, b);
+      if (al.d.length < 20) return null;
+      d = al.d; ya = al.ya; yb = al.yb;
+    }
+    const n = d.length;
     let start = 0;
     if (range !== 'MAX') {
-      const last = new Date(a.d[n - 1] * DAY);
+      const last = new Date(d[n - 1] * DAY);
       let cutoff;
       if (range === 'YTD') cutoff = Date.UTC(last.getUTCFullYear() - 1, 11, 31) / DAY;
       else {
         const months = RANGE_DEFS.find((r) => r.id === range).m;
         cutoff = Date.UTC(last.getUTCFullYear(), last.getUTCMonth() - months, last.getUTCDate()) / DAY;
       }
-      start = Math.max(0, bsearchLE(a.d, cutoff));
+      start = Math.max(0, bsearchLE(d, cutoff));
     }
-    const xs = a.xs.subarray(start);
-    const ys = a.ys.subarray(start);
+    const xs = Float64Array.from(d.slice(start), (x) => x * DAY);
+    const ys = ya.subarray(start);
+    const ys2 = yb ? yb.subarray(start) : null;
     return {
-      kind: 'daily', range, xs, ys, base: ys[0], baseLabel: null, domain: [xs[0], xs[xs.length - 1]],
+      kind: 'daily', range, xs, ys, ys2, base: ys[0], base2: ys2 ? ys2[0] : null, baseLabel: null, domain: [xs[0], xs[xs.length - 1]],
       label: (i) => F.dayLong.format(xs[i]), ticks: timeTicks,
     };
   }
@@ -400,7 +502,7 @@
     // reference = last daily close before the first session, when the history has it
     let base = ys[0];
     let baseLabel = null;
-    const a = histArrays();
+    const a = histArrays('spx');
     if (a) {
       const firstDay = nyDayNumber(t[0]);
       const i = bsearchLE(a.d, firstDay - 1);
@@ -418,6 +520,7 @@
     const r = S.range;
     const v = r === '1D' ? intradayView() : r === '5D' ? weekView() : dailyView(r);
     if (!v) return null;
+    if (v.ys2) v.pct2 = Float64Array.from(v.ys2, (y) => (y / v.base2 - 1) * 100);
     const n = v.xs.length;
     const peak0 = v.kind === 'daily' ? v.ys[0] : v.ys[0];
     v.pct = new Float64Array(n);
@@ -543,8 +646,10 @@
     const pt = 16;
     const pb = 30;
     const series = plotSeries(v);
+    const series2 = v.pct2 || null;
     let min = Infinity, max = -Infinity;
     for (let i = 0; i < series.length; i++) { if (series[i] < min) min = series[i]; if (series[i] > max) max = series[i]; }
+    if (series2) for (let i = 0; i < series2.length; i++) { if (series2[i] < min) min = series2[i]; if (series2[i] > max) max = series2[i]; }
     const baseP = S.mode === 'price' ? (S.log ? Math.log(v.base) : v.base) : S.mode === 'pct' ? 0 : 0;
     if (S.mode !== 'dd' && v.kind !== 'daily') { min = Math.min(min, baseP); max = Math.max(max, baseP); } // keep the reference line in view
     if (S.mode === 'pct') { min = Math.min(min, 0); max = Math.max(max, 0); }
@@ -556,7 +661,7 @@
     const [x0, x1] = v.domain;
     const sx = (x) => pl + ((x - x0) / (x1 - x0 || 1)) * (pr - pl);
     const sy = (y) => pt + ((y0 - y) / (y0 - y1 || 1)) * (S.h - pt - pb);
-    return { pl, pr, pt, pb, series, min, max, y0, y1, sx, sy, baseP, x0, x1 };
+    return { pl, pr, pt, pb, series, series2, min, max, y0, y1, sx, sy, baseP, x0, x1 };
   }
 
   function yTicksFor(g) {
@@ -625,43 +730,56 @@
       }
     }
 
-    /* line + area (revealed left to right) */
+    /* line(s) + area, revealed left to right */
     const n = v.xs.length;
-    const idx = lttb(Float64Array.from(v.xs, (x) => sx(x)), Float64Array.from(g.series, (y) => sy(y)), Math.max(200, Math.round((pr - pl) * 2)));
-    const at = (k) => (idx ? idx[k] : k);
-    const count = idx ? idx.length : n;
+    const px = Float64Array.from(v.xs, (x) => sx(x));
+    const target = Math.max(200, Math.round((pr - pl) * 2));
+    const trace = (series) => {
+      const idx = lttb(px, Float64Array.from(series, (y) => sy(y)), target);
+      const count = idx ? idx.length : n;
+      return { at: (k) => (idx ? idx[k] : k), count };
+    };
+    const path = (series, t) => { ctx.beginPath(); for (let k = 0; k < t.count; k++) { const i = t.at(k); const X = px[i]; const Y = sy(series[i]); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); } };
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, pl + (S.w - pl) * S.progress, S.h);
     ctx.clip();
-    const baseline = S.mode === 'dd' ? sy(0) : S.mode === 'pct' ? sy(0) : S.h - pb;
-    const grad = ctx.createLinearGradient(0, pt, 0, S.h - pb);
-    grad.addColorStop(0, 'rgba(239,233,221,.16)');
-    grad.addColorStop(1, 'rgba(239,233,221,0)');
-    ctx.beginPath();
-    for (let k = 0; k < count; k++) { const i = at(k); const X = sx(v.xs[i]); const Y = sy(g.series[i]); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
-    ctx.lineTo(sx(v.xs[at(count - 1)]), baseline);
-    ctx.lineTo(sx(v.xs[at(0)]), baseline);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.beginPath();
-    for (let k = 0; k < count; k++) { const i = at(k); const X = sx(v.xs[i]); const Y = sy(g.series[i]); k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
-    ctx.lineWidth = 2;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = C.line;
-    ctx.stroke();
+    if (!g.series2) {
+      const t = trace(g.series);
+      const baseline = S.mode === 'dd' ? sy(0) : S.mode === 'pct' ? sy(0) : S.h - pb;
+      const grad = ctx.createLinearGradient(0, pt, 0, S.h - pb);
+      grad.addColorStop(0, 'rgba(239,233,221,.16)');
+      grad.addColorStop(1, 'rgba(239,233,221,0)');
+      path(g.series, t);
+      ctx.lineTo(px[t.at(t.count - 1)], baseline);
+      ctx.lineTo(px[t.at(0)], baseline);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+      path(g.series, t);
+      ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = C.line; ctx.stroke();
+    } else {
+      // compare mode: two lines, no area fills, categorical slots 1 and 2
+      [[g.series, C.s1], [g.series2, C.s2]].forEach(([ser, col]) => {
+        path(ser, trace(ser));
+        ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = col; ctx.stroke();
+      });
+    }
     ctx.restore();
 
     if (S.progress >= 1) {
-      annotate(v, g, n);
-      /* end marker + value badge */
+      if (!g.series2 && S.sym === 'spx') annotate(v, g, n);
+      else if (!g.series2) annotate(v, g, n, true);
       const lx = sx(v.xs[n - 1]);
-      const ly = sy(g.series[n - 1]);
-      ring(lx, ly, 4, C.line);
-      const label = S.mode === 'price' ? fmtAxisPrice(v.ys[n - 1]) : fmtPct(S.mode === 'pct' ? v.pct[n - 1] : v.dd[n - 1], 1);
-      badge(label, pr + 6, ly);
+      if (g.series2) {
+        ring(lx, sy(g.series[n - 1]), 4, C.s1);
+        ring(lx, sy(g.series2[n - 1]), 4, C.s2);
+      } else {
+        const ly = sy(g.series[n - 1]);
+        ring(lx, ly, 4, C.line);
+        const label = S.mode === 'price' ? fmtAxisPrice(v.ys[n - 1]) : fmtPct(S.mode === 'pct' ? v.pct[n - 1] : v.dd[n - 1], 1);
+        badge(label, pr + 6, ly);
+      }
       if (S.hover >= 0) drawHover(v, g);
     }
   }
@@ -696,10 +814,10 @@
   }
 
   /** Selective direct labels: the trough in drawdown view, named events on long ranges, extremes on short ones. */
-  function annotate(v, g, n) {
+  function annotate(v, g, n, noEvents) {
     const { sx, sy, pl, pr, series } = g;
     ctx.font = MONO;
-    const long = v.kind === 'daily' && v.xs[n - 1] - v.xs[0] > 4 * 365 * DAY;
+    const long = !noEvents && v.kind === 'daily' && v.xs[n - 1] - v.xs[0] > 4 * 365 * DAY;
     const put = (i, text, above) => {
       const x = sx(v.xs[i]);
       const y = sy(series[i]);
@@ -736,6 +854,7 @@
       });
       return;
     }
+    if (v.kind === 'daily' && v.xs[n - 1] - v.xs[0] > 4 * 365 * DAY) return; // long ranges of non-S&P assets: no clutter
     let hi = 0, lo = 0;
     for (let i = 1; i < n; i++) { if (series[i] > series[hi]) hi = i; if (series[i] < series[lo]) lo = i; }
     const name = (i, kind) => `${kind} ${S.mode === 'price' ? fmtAxisPrice(v.ys[i]) : fmtPct(v.pct[i], 1)}`;
@@ -746,11 +865,11 @@
   function drawHover(v, g) {
     const i = S.hover;
     const x = g.sx(v.xs[i]);
-    const y = g.sy(g.series[i]);
     ctx.strokeStyle = C.cross;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, g.pt); ctx.lineTo(Math.round(x) + 0.5, S.h - g.pb); ctx.stroke();
-    ring(x, y, 4.5, C.line);
+    if (g.series2) { ring(x, g.sy(g.series[i]), 4.5, C.s1); ring(x, g.sy(g.series2[i]), 4.5, C.s2); }
+    else ring(x, g.sy(g.series[i]), 4.5, C.line);
   }
 
   /* ---------- redraw / animation ---------- */
@@ -759,6 +878,7 @@
     S.view = buildView();
     S.hover = -1;
     E.tip.hidden = true;
+    renderLegend();
     renderStats();
     if (!E.tableWrap.hidden) renderTable();
     updateAria();
@@ -788,8 +908,13 @@
     if (!v) return;
     const n = v.xs.length;
     const chg = (v.ys[n - 1] / v.base - 1) * 100;
-    const name = { '1D': 'today', '5D': 'the last 5 sessions', '1M': 'the last month', '6M': 'the last 6 months', YTD: 'this year so far', '1Y': 'the last year', '5Y': 'the last 5 years', MAX: 'since 1975' }[v.range];
-    E.canvas.setAttribute('aria-label', `S&P 500 ${S.mode === 'dd' ? 'drawdown' : S.mode === 'pct' ? 'percentage change' : 'price'} over ${name}: ${fmtPct(chg, 1)}, latest ${fmtPrice(v.ys[n - 1])}. Use the left and right arrow keys to read values.`);
+    const name = { '1D': 'today', '5D': 'the last 5 sessions', '1M': 'the last month', '6M': 'the last 6 months', YTD: 'this year so far', '1Y': 'the last year', '5Y': 'the last 5 years', MAX: `since ${new Date(v.xs[0]).getUTCFullYear()}` }[v.range];
+    if (v.ys2) {
+      const chg2 = (v.ys2[n - 1] / v.base2 - 1) * 100;
+      E.canvas.setAttribute('aria-label', `${symName(S.sym)} versus ${symName(S.cmp)}, percentage change over ${name}: ${symName(S.sym)} ${fmtPct(chg, 1)}, ${symName(S.cmp)} ${fmtPct(chg2, 1)}. Use the left and right arrow keys to read values.`);
+      return;
+    }
+    E.canvas.setAttribute('aria-label', `${symName(S.sym)} ${S.mode === 'dd' ? 'drawdown' : S.mode === 'pct' ? 'percentage change' : 'price'} over ${name}: ${fmtPct(chg, 1)}, latest ${fmtSym(S.sym, v.ys[n - 1])}. Use the left and right arrow keys to read values.`);
   }
 
   /* ---------- hover, touch, keyboard ---------- */
@@ -814,6 +939,7 @@
   }
   function tipText(i) {
     const v = S.view;
+    if (v.ys2) return `${v.label(i)}: ${symName(S.sym)} ${fmtPct(v.pct[i], 2)}, ${symName(S.cmp)} ${fmtPct(v.pct2[i], 2)} since the start of the range`;
     const val = valueAt(i);
     return `${v.label(i)}: ${fmtPrice(val.price)}, ${fmtPct(val.pct, 2)} versus ${v.baseLabel ? v.baseLabel.toLowerCase() : 'the start of the range'}${S.mode === 'dd' ? `, ${fmtPct(val.dd, 2)} from the peak` : ''}`;
   }
@@ -825,17 +951,29 @@
     const r2 = document.createElement('div'); r2.className = 't-row';
     const k2 = document.createElement('i'); k2.style.opacity = '.4'; const t2 = document.createElement('span'); r2.append(k2, t2);
     E.tip.append(b, d, r1, r2);
-    return { b, d, t1, t2 };
+    return { b, d, t1, t2, k1, k2 };
   })();
   function showTip(i) {
     const v = S.view;
     const g = S.geo;
     const val = valueAt(i);
-    tipNodes.b.textContent = S.mode === 'dd' ? fmtPct(val.dd, 2) : S.mode === 'pct' ? fmtPct(val.pct, 2) : fmtPrice(val.price);
-    tipNodes.d.textContent = v.label(i);
-    tipNodes.t1.textContent = S.mode === 'price' ? `Close ${fmtPrice(val.price)}` : `S&P 500 ${fmtPrice(val.price)}`;
-    const chg = v.baseLabel ? `${fmtPct(val.pct, 2)} vs ${v.baseLabel.toLowerCase()}` : `${fmtPct(val.pct, 2)} since range start`;
-    tipNodes.t2.textContent = S.mode === 'dd' ? `${fmtPct(val.dd, 2)} below peak` : chg;
+    if (v.ys2) {
+      // one tooltip, every series: value leads, name follows, a short line in the series colour is the key
+      tipNodes.b.textContent = v.label(i);
+      tipNodes.d.textContent = 'Change since the start of the range';
+      tipNodes.k1.style.cssText = `background:${C.s1};opacity:1;height:3px`;
+      tipNodes.k2.style.cssText = `background:${C.s2};opacity:1;height:3px`;
+      tipNodes.t1.textContent = `${fmtPct(v.pct[i], 2)} ${symName(S.sym)} · ${fmtSym(S.sym, v.ys[i])}`;
+      tipNodes.t2.textContent = `${fmtPct(v.pct2[i], 2)} ${symName(S.cmp)} · ${fmtSym(S.cmp, v.ys2[i])}`;
+    } else {
+      tipNodes.k1.style.cssText = '';
+      tipNodes.k2.style.cssText = 'opacity:.4';
+      tipNodes.b.textContent = S.mode === 'dd' ? fmtPct(val.dd, 2) : S.mode === 'pct' ? fmtPct(val.pct, 2) : fmtSym(S.sym, val.price);
+      tipNodes.d.textContent = v.label(i);
+      tipNodes.t1.textContent = S.mode === 'price' ? `Close ${fmtSym(S.sym, val.price)}` : `${symName(S.sym)} ${fmtSym(S.sym, val.price)}`;
+      const chg = v.baseLabel ? `${fmtPct(val.pct, 2)} vs ${v.baseLabel.toLowerCase()}` : `${fmtPct(val.pct, 2)} since range start`;
+      tipNodes.t2.textContent = S.mode === 'dd' ? `${fmtPct(val.dd, 2)} below peak` : chg;
+    }
     E.tip.hidden = false;
     const x = g.sx(v.xs[i]);
     const w = E.tip.offsetWidth;
@@ -885,10 +1023,76 @@
     return wrap;
   }
 
+  function logReturnStats(ys) {
+    let sum = 0, sum2 = 0;
+    for (let i = 1; i < ys.length; i++) { const r = Math.log(ys[i] / ys[i - 1]); sum += r; sum2 += r * r; }
+    const m = ys.length - 1;
+    return Math.sqrt(Math.max(0, (sum2 - (sum * sum) / m) / (m - 1))) * Math.sqrt(252) * 100;
+  }
+  function maxDrawdown(ys) {
+    let peak = ys[0], worst = 0;
+    for (let i = 1; i < ys.length; i++) { if (ys[i] > peak) peak = ys[i]; worst = Math.min(worst, ys[i] / peak - 1); }
+    return worst * 100;
+  }
+  function correlation(a, b) {
+    const n = a.length - 1;
+    let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    for (let i = 1; i <= n; i++) { const x = Math.log(a[i] / a[i - 1]); const y = Math.log(b[i] / b[i - 1]); sa += x; sb += y; saa += x * x; sbb += y * y; sab += x * y; }
+    const cov = sab / n - (sa / n) * (sb / n);
+    return cov / Math.sqrt((saa / n - (sa / n) ** 2) * (sbb / n - (sb / n) ** 2));
+  }
+
+  function renderCompareStats(v) {
+    const n = v.xs.length;
+    const A = symName(S.sym), B = symName(S.cmp);
+    const pa = (v.ys[n - 1] / v.base - 1) * 100;
+    const pb = (v.ys2[n - 1] / v.base2 - 1) * 100;
+    const gap = pa - pb;
+    const rho = correlation(v.ys, v.ys2);
+    const years = (v.xs[n - 1] - v.xs[0]) / (365.25 * DAY);
+    const from = F.dayLong.format(v.xs[0]);
+    const dir = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '');
+    E.stats.append(
+      tile(`${A} change`, fmtPct(pa, 2), `${fmtSym(S.sym, v.ys[0])} → ${fmtSym(S.sym, v.ys[n - 1])}`, dir(pa)),
+      tile(`${B} change`, fmtPct(pb, 2), `${fmtSym(S.cmp, v.ys2[0])} → ${fmtSym(S.cmp, v.ys2[n - 1])}`, dir(pb)),
+      tile('Gap', `${fmtDelta(gap, 1)} pts`, `${gap >= 0 ? A : B} ahead since ${from}`),
+      tile('Correlation', nf(2).format(rho).replace('-', MIN), `daily returns, ${nf(0).format(n - 1)} days`),
+      tile(`${A} max drawdown`, fmtPct(maxDrawdown(v.ys), 1), 'peak to trough in range'),
+      tile(`${B} max drawdown`, fmtPct(maxDrawdown(v.ys2), 1), 'peak to trough in range'),
+      tile(`${A} volatility`, `${nf(1).format(logReturnStats(v.ys))}%`, 'annualized, daily returns'),
+      tile(`${B} volatility`, `${nf(1).format(logReturnStats(v.ys2))}%`, years < 1 ? 'annualized, daily returns' : `over ${nf(years >= 10 ? 0 : 1).format(years)} years`),
+    );
+  }
+
+  function renderLegend() {
+    const v = S.view;
+    E.legend.replaceChildren();
+    E.legend.hidden = !(v && v.ys2);
+    if (!v || !v.ys2) return;
+    const n = v.xs.length;
+    [[S.sym, C.s1, v.pct[n - 1]], [S.cmp, C.s2, v.pct2[n - 1]]].forEach(([id, col, p]) => {
+      const li = document.createElement('li');
+      const key = document.createElement('i');
+      key.style.background = col;
+      key.setAttribute('aria-hidden', 'true');
+      const name = document.createElement('span');
+      name.textContent = symName(id);
+      const val = document.createElement('b');
+      val.textContent = fmtPct(p, 1);
+      li.append(key, name, val);
+      E.legend.append(li);
+    });
+    const note = document.createElement('li');
+    note.className = 'note';
+    note.textContent = `Both start at 0% on ${F.dayLong.format(v.xs[0])}${S.range !== 'MAX' ? '' : ' — the first date both have data'}`;
+    E.legend.append(note);
+  }
+
   function renderStats() {
     const v = S.view;
     E.stats.replaceChildren();
     if (!v) return;
+    if (v.ys2) return renderCompareStats(v);
     const n = v.xs.length;
     const end = v.ys[n - 1];
     const chg = end - v.base;
@@ -900,9 +1104,9 @@
     const when = (i) => (v.kind === 'daily' ? F.dayLong.format(v.xs[i]) : v.kind === 'intraday' ? `${F.etTime.format(v.xs[i])} ET` : v.label(i).replace(' ET', ''));
     const dir = chg > 0 ? 'up' : chg < 0 ? 'down' : '';
     const tiles = [];
-    tiles.push(tile('Change', fmtPct(pct, 2), `${fmtDelta(chg)} pts ${v.baseLabel ? `vs ${v.baseLabel.toLowerCase()}` : 'over the range'}`, dir));
-    tiles.push(tile('Range high', fmtPrice(v.ys[hi]), when(hi)));
-    tiles.push(tile('Range low', fmtPrice(v.ys[lo]), when(lo)));
+    tiles.push(tile('Change', fmtPct(pct, 2), `${fmtDelta(chg, symDigits(S.sym))} pts ${v.baseLabel ? `vs ${v.baseLabel.toLowerCase()}` : 'over the range'}`, dir));
+    tiles.push(tile('Range high', fmtSym(S.sym, v.ys[hi]), when(hi)));
+    tiles.push(tile('Range low', fmtSym(S.sym, v.ys[lo]), when(lo)));
     tiles.push(tile('Max drawdown', v.dd[trough] === 0 ? '0.0%' : fmtPct(v.dd[trough], 1), v.dd[trough] === 0 ? 'No decline from a peak' : `${when(peakI)} → ${when(trough)}`));
 
     // annualised return + volatility need daily data over a meaningful span
@@ -920,13 +1124,13 @@
     } else tiles.push(tile('Volatility', '—', 'needs daily data'));
 
     // all-time high + 52-week range always come from the full history
-    const a = histArrays();
+    const a = histArrays(S.sym);
     if (a) {
       const m = a.ys.length;
       let ath = 0;
       for (let i = 1; i < m; i++) if (a.ys[i] >= a.ys[ath]) ath = i;
       const off = (a.ys[m - 1] / a.ys[ath] - 1) * 100;
-      tiles.push(tile('Vs all-time high', off >= -0.005 ? 'At a record' : fmtPct(off, 1), `record close ${fmtPrice(a.ys[ath])} · ${F.dayLong.format(a.xs[ath])}`));
+      tiles.push(tile('Vs all-time high', off >= -0.005 ? 'At a record' : fmtPct(off, 1), `record close ${fmtSym(S.sym, a.ys[ath])} · ${F.dayLong.format(a.xs[ath])}`));
       const from = Math.max(0, bsearchLE(a.xs, a.xs[m - 1] - 365 * DAY));
       let h52 = -Infinity, l52 = Infinity;
       for (let i = from; i < m; i++) { if (a.ys[i] > h52) h52 = a.ys[i]; if (a.ys[i] < l52) l52 = a.ys[i]; }
@@ -940,6 +1144,10 @@
     const v = S.view;
     const body = E.table.tBodies[0];
     body.replaceChildren();
+    const head = E.table.tHead.rows[0];
+    head.replaceChildren();
+    const cols = v && v.ys2 ? ['Date', `${symName(S.sym)} close`, `${symName(S.sym)} change`, `${symName(S.cmp)} close`, `${symName(S.cmp)} change`] : ['Date', 'Close', 'Change in range'];
+    cols.forEach((t) => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = t; head.append(th); });
     if (!v) return;
     const n = v.xs.length;
     const rows = Math.min(n, 40);
@@ -950,14 +1158,15 @@
       seen.add(i);
       const tr = body.insertRow();
       tr.insertCell().textContent = v.label(i);
-      tr.insertCell().textContent = fmtPrice(v.ys[i]);
+      tr.insertCell().textContent = fmtSym(S.sym, v.ys[i]);
       tr.insertCell().textContent = fmtPct(v.pct[i], 2);
+      if (v.ys2) { tr.insertCell().textContent = fmtSym(S.cmp, v.ys2[i]); tr.insertCell().textContent = fmtPct(v.pct2[i], 2); }
     }
   }
 
   /* ---------- "what if you had invested" calculator ---------- */
   function initCalc() {
-    const a = histArrays();
+    const a = histArrays('spx');
     if (!a || !E.calc) return;
     const firstYear = new Date(a.xs[0]).getUTCFullYear();
     const lastYear = new Date(a.xs[a.xs.length - 1]).getUTCFullYear();
@@ -975,7 +1184,7 @@
   }
   const calcState = { xs: null, ys: null };
   function updateCalc() {
-    const a = histArrays();
+    const a = histArrays('spx');
     if (!a) return;
     const amount = Math.max(1, Math.min(1e9, parseFloat(E.amount.value) || 0));
     const year = parseInt(E.year.value, 10);
