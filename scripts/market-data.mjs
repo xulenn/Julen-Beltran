@@ -9,6 +9,7 @@
 //
 //   live.json      ticker quotes + the S&P 500's latest session at 1-minute resolution
 //   history.json   S&P 500 daily closes since 1975, plus 30-day sparklines for the ticker
+//   hist-<id>.json daily closes for every other asset in the ticker (chart switcher + compare mode)
 //   sessions.json  last few sessions at 5-minute resolution (feeds the 5-day view; Cboe only
 //                  serves the latest session, so this file accumulates day by day)
 //
@@ -18,7 +19,7 @@
 // Principles: never write fabricated data, never replace good data with worse data. If a
 // request fails, the previous value is kept and the page shows its real timestamp.
 
-import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, appendFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -27,6 +28,7 @@ const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const HISTORY_MAX_AGE_H = 20;
 const KEEP_SESSIONS = 6;
+const RETRY_MISSING_AFTER_H = 1.5; // a missing per-asset file triggers a retry, but not on every 10-minute run
 
 /** `scale` converts Cboe's value to the headline value (DJX is 1/100th of the Dow). */
 export const SYMBOLS = [
@@ -202,20 +204,31 @@ export async function run(outDir, log = console.log) {
   let changed = false;
   let failures = 0;
 
-  // ---- daily history (S&P 500) + sparklines — at most once a day
+  // ---- daily history (S&P 500 + every other asset) and sparklines — at most once a day
+  const exists = (f) => access(join(outDir, f)).then(() => true, () => false);
+  const histFile = (def) => (def.id === 'spx' ? 'history.json' : `hist-${def.id}.json`);
+  const withHistory = SYMBOLS.filter((x) => !x.noHistory);
+  const missing = [];
+  for (const def of withHistory) if (!(await exists(histFile(def)))) missing.push(def.id);
   let hist = prevHist;
   const age = prevHist ? (now - new Date(prevHist.generated)) / 3_600_000 : Infinity;
-  if (!prevHist || age > HISTORY_MAX_AGE_H || process.env.FORCE_HISTORY) {
+  if (!prevHist || age > HISTORY_MAX_AGE_H || process.env.FORCE_HISTORY || (missing.length && age > RETRY_MISSING_AFTER_H)) {
     try {
       const h = parseHistory(await getJson('charts/historical/_SPX.json'));
       const sparks = { ...(prevHist?.sparks || {}) };
-      for (const def of SYMBOLS) {
-        if (def.noHistory) continue;
+      for (const def of withHistory) {
         try {
           const s = def.id === 'spx' ? h : parseHistory(await getJson(`charts/historical/${def.sym}.json`));
           sparks[def.id] = s.c.slice(-30).map((x) => round(x, 4));
+          if (def.id !== 'spx') {
+            const k = def.scale ?? 1;
+            await writeFile(join(outDir, histFile(def)), JSON.stringify({
+              v: 1, id: def.id, symbol: def.sym.replace('_', '^'), name: def.name, source: 'cboe', generated: now.toISOString(),
+              d: s.d, c: s.c.map((x) => round(x * k, 2)),
+            }));
+          }
         } catch (err) {
-          log(`sparkline ${def.sym}: ${err.message}`);
+          log(`history ${def.sym}: ${err.message}${(await exists(histFile(def))) ? ' (keeping previous file)' : ''}`);
         }
         await sleep(tuning.politeMs);
       }
@@ -230,6 +243,9 @@ export async function run(outDir, log = console.log) {
   } else {
     log(`history: fresh enough (${age.toFixed(1)} h old)`);
   }
+  // which assets can the chart switch to? (ids with a history file on disk)
+  const histories = [];
+  for (const def of withHistory) if (await exists(histFile(def))) histories.push(def.id);
 
   // ---- quotes
   const quotes = [];
@@ -279,7 +295,7 @@ export async function run(outDir, log = console.log) {
 
   if (!quotes.length && !hist) throw new Error('No market data could be fetched');
 
-  const live = { v: 1, generated: now.toISOString(), source: 'cboe', quotes, spx };
+  const live = { v: 1, generated: now.toISOString(), source: 'cboe', quotes, spx, histories };
   if (stable(prevLive) !== stable(live)) {
     await writeFile(join(outDir, 'live.json'), JSON.stringify(live));
     changed = true;
