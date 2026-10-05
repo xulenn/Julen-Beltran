@@ -21,6 +21,8 @@
   <meta name="twitter:card" content="summary_large_image" />
 
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="site.webmanifest" />
   <link rel="preload" href="assets/fonts/lora-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="assets/css/main.css" />
@@ -273,7 +275,7 @@
     <div class="wrap">
       <p class="kicker reveal"><span>03</span> Risk lab</p>
       <div class="lab-head">
-        <h2 class="display reveal" id="lab-title">Four questions about <em>risk</em>.</h2>
+        <h2 class="display reveal" id="lab-title">Five questions about <em>risk</em>.</h2>
         <p class="lab-sub reveal">Everything below is calculated in your browser from the same daily S&amp;P&nbsp;500 data as the chart above — <span id="lab-span">decades of it</span>. Price only: no dividends, no inflation adjustment, no taxes.</p>
       </div>
 
@@ -323,6 +325,26 @@
             <li><i class="k-line"></i>if returns were normally distributed</li>
           </ul>
           <dl class="ft-stats" id="lab-ft-stats"></dl>
+        </article>
+
+        <article class="lab-card lab-wide">
+          <p class="label">05 · Seasonality</p>
+          <h3>Does the calendar matter?</h3>
+          <p class="lab-take" id="lab-se-take"></p>
+          <div class="se">
+            <div class="se-left">
+              <div class="rp-read se-read" id="lab-se-read" aria-live="polite"></div>
+              <div class="se-hm" id="lab-se-hm" tabindex="0" role="img" aria-label="Heat map of S&amp;P 500 monthly returns, one row per year and one column per month. Use the arrow keys to move between months; the details appear below the chart."></div>
+              <div class="se-scale" id="lab-se-scale" aria-hidden="true"></div>
+            </div>
+            <div class="se-right">
+              <p class="label se-sub">By calendar month</p>
+              <div class="se-head" aria-hidden="true"><span></span><span>Average, with its 95% range</span><span>Average</span><span>Years up</span></div>
+              <ul class="se-rows" id="lab-se-months" aria-label="Average return by calendar month"></ul>
+              <div class="se-ext" id="lab-se-ext"></div>
+              <p class="lab-foot" id="lab-se-foot"></p>
+            </div>
+          </div>
         </article>
       </div>
     </div>

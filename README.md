@@ -11,10 +11,11 @@ index.html              the page
 assets/css/main.css     all styles (light/dark themes, responsive)
 assets/js/app.js        UI: theme, nav, reveals, reading shelf, ⌘K command palette
 assets/js/market.js     the S&P 500 section: ticker, canvas chart, stats, calculator
-assets/js/lab.js        the Risk lab section (four panels, rendered from the S&P history)
+assets/js/lab.js        the Risk lab section (five panels, rendered from the S&P history)
 assets/js/risk-math.js  the Risk lab's maths: pure functions, unit-tested
 assets/js/books.js      reading-list data and notes
 assets/img, fonts, docs optimised images, self-hosted fonts (OFL), CVs and portfolio report
+assets/icons            apple-touch / PWA icons (site.webmanifest at the root; no service worker on purpose)
 scripts/                market-data fetcher + Risk-lab maths tests
 .github/workflows/      scheduled data refresh (market-data.yml) and unit tests (tests.yml)
 ```
@@ -50,8 +51,9 @@ Things worth knowing:
 
 ## The Risk lab
 
-`assets/js/lab.js` answers four questions from the same daily S&P 500 series as the chart (holding-period
-outcomes, drawdowns, missing the best days, fat tails). All numbers are computed in the browser by
+`assets/js/lab.js` answers five questions from the same daily S&P 500 series as the chart (holding-period
+outcomes, drawdowns, missing the best days, fat tails, seasonality — a years × months heat map plus per-calendar-month
+averages with 95% ranges, drawn on a validated blue↔red diverging scale). All numbers are computed in the browser by
 `assets/js/risk-math.js`, whose unit tests (`node --test scripts/risk-math.test.mjs`) use series with
 analytically known answers. The text under each chart is generated from the numbers, so it can't drift out of sync.
 

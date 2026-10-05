@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const { percentile, holding, drawdowns, bestDays, erfc, Phi, tails } = createRequire(import.meta.url)('../assets/js/risk-math.js');
+const { percentile, holding, drawdowns, bestDays, erfc, Phi, tails, seasonality } = createRequire(import.meta.url)('../assets/js/risk-math.js');
 
 const close = (a, b, tol = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= tol * Math.max(1, Math.abs(b)), `${msg} expected ${b}, got ${a}`);
 
@@ -103,4 +103,84 @@ test('tails: a normal sample looks normal; a fat-tailed one does not', () => {
   assert.ok(fat.kurtosis > 3, `kurtosis ${fat.kurtosis}`);
   assert.ok(fat.beyond[1].observed > 10 * fat.beyond[1].expected, '4σ days are far more common than a bell curve predicts');
   assert.ok(fat.worst.r < -8 && fat.best.r > 8);
+});
+
+// Daily series whose month-end closes follow `ret(y, m)`, with deliberately noisy closes in between
+// (the intermediate days must not influence a month-end to month-end return).
+function monthlySeries(y0, y1, ret) {
+  const d = [], c = [];
+  let px = 100;
+  for (let y = y0; y <= y1; y++) {
+    for (let m = 0; m < 12; m++) {
+      const endDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      const days = [2, 15, endDay];
+      const start = px;
+      days.forEach((dd, k) => {
+        d.push(Date.UTC(y, m, dd) / 86400000);
+        if (k === days.length - 1) { if (!(y === y0 && m === 0)) px = start * (1 + ret(y, m)); c.push(px); }
+        else c.push(start * (k ? 0.5 : 1.9)); // noise
+      });
+    }
+  }
+  return { d, c };
+}
+
+test('seasonality: month-end returns, first month dropped, latest month flagged and excluded from the stats', () => {
+  const a = (m) => (m - 5.5) / 100; // each calendar month has its own mean: -5.5% .. +5.5%
+  const wob = (y) => (y % 2 ? 0.01 : -0.01); // alternate years so the standard deviation is known
+  const S = monthlySeries(1980, 1999, (y, m) => a(m) + wob(y));
+  const R = seasonality(S.d, S.c);
+  assert.equal(R.y0, 1980);
+  assert.equal(R.y1, 1999);
+  assert.equal(R.grid.length, 20);
+  assert.equal(R.grid[0][0], null, 'January 1980 has no earlier month-end to measure from');
+  assert.equal(R.monthly.length, 20 * 12 - 1);
+  assert.equal(R.last.y, 1999);
+  assert.equal(R.last.m, 11);
+  assert.equal(R.last.partial, true);
+  close(R.grid[1][3].r, a(3) + wob(1981), 1e-9, 'April 1981');
+  assert.equal(R.grid[19][11].partial, true);
+  R.months.forEach((x, m) => {
+    const n = m === 0 ? 19 : m === 11 ? 19 : 20; // January 1980 and the partial December 1999 are out
+    assert.equal(x.n, n, `n for month ${m}`);
+    if (m !== 0 && m !== 11) {
+      close(x.mean, a(m), 1e-9, `mean ${m}`);
+      close(x.median, a(m), 1e-9, `median ${m}`);
+      close(x.sd, 0.01 * Math.sqrt(20 / 19), 1e-9, `sd ${m}`);
+      close(x.se, x.sd / Math.sqrt(20), 1e-12);
+      close(x.hi - x.lo, 2 * 1.96 * x.se, 1e-12);
+      close(x.best.r, a(m) + 0.01, 1e-9);
+      close(x.worst.r, a(m) - 0.01, 1e-9);
+      assert.equal(x.up, a(m) - 0.01 > 0 ? 1 : a(m) + 0.01 < 0 ? 0 : 0.5);
+    }
+  });
+  assert.equal(R.all.n, 20 * 12 - 2);
+  // the two excluded months are January 1980 (no return) and December 1999 (partial); the means cancel out to ~0
+  assert.ok(Math.abs(R.all.mean) < 0.002);
+});
+
+test('seasonality: a month with a real edge stands out, an iid world does not', () => {
+  // 40 years in which every December earns +4% and every other month is zero-mean noise with the same size
+  const r = rng(7);
+  const S = monthlySeries(1970, 2009, (y, m) => (m === 11 ? 0.04 : 0) + normal(r) * 0.01);
+  const R = seasonality(S.d, S.c);
+  assert.ok(R.months[11].mean > 0.035 && R.months[11].lo > R.all.mean, 'December clearly above the average');
+  assert.ok(R.exceed >= 1);
+  const quiet = monthlySeries(1970, 2009, () => normal(r) * 0.04);
+  const Q = seasonality(quiet.d, quiet.c);
+  assert.ok(Q.exceed <= 3, `a world with no seasonality flagged ${Q.exceed} months`);
+  // every cell's colour bucket depends only on its own return
+  assert.equal(Q.monthly.filter((e) => e.partial).length, 1);
+});
+
+test('seasonality: a gap in the data is not turned into a fake monthly return', () => {
+  const S = monthlySeries(1990, 1993, () => 0.01);
+  // delete all of March 1991 (day numbers inside that month)
+  const lo = Date.UTC(1991, 2, 1) / 86400000, hi = Date.UTC(1991, 3, 1) / 86400000;
+  const keep = S.d.map((x) => x < lo || x >= hi);
+  const d = S.d.filter((_, i) => keep[i]), c = S.c.filter((_, i) => keep[i]);
+  const R = seasonality(d, c);
+  assert.equal(R.grid[1][2], null, 'March 1991 is missing');
+  assert.equal(R.grid[1][3], null, 'April 1991 spans the gap, so it has no valid return either');
+  assert.ok(R.grid[1][4] && Math.abs(R.grid[1][4].r - 0.01) < 1e-9);
 });
