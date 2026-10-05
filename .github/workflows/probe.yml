@@ -14,27 +14,28 @@ jobs:
     steps:
       - name: Probe Cboe
         shell: bash
+        continue-on-error: true
         run: |
           UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
           B=https://cdn.cboe.com/api/global/delayed_quotes
-          get() { curl -sS -m 30 -A "$UA" -H 'Accept: application/json' -o "$2" -w '%{http_code} %{size_download}B %{time_total}s' "$1" || echo "curl-failed"; }
+          get() { curl -sSL -m 30 -A "$UA" -H 'Accept: application/json' -o "$2" -w '%{http_code} %{size_download}B %{time_total}s eff=%{url_effective}' "$1" || echo "curl-failed"; }
 
           echo "##### quote layout for _SPX (options removed)"
           get "$B/quotes/_SPX.json" /tmp/spx.json; echo
-          jq -c '{timestamp, keys: (.data | del(.options) | keys), sample: (.data | del(.options) | with_entries(select(.value|type!="object")))}' /tmp/spx.json | head -c 2500; echo
-          jq -c '.data.options | length' /tmp/spx.json
+          jq -c '{timestamp, keys: (.data | del(.options) | keys), sample: (.data | del(.options) | with_entries(select(.value|type!="object")))}' /tmp/spx.json | head -c 2500; echo || true
+          jq -c '.data.options | length' /tmp/spx.json || true
 
           echo; echo "##### historical layout _SPX"
           get "$B/charts/historical/_SPX.json" /tmp/h.json; echo
-          jq -c '{timestamp, n: (.data|length), first: .data[0], last: .data[-1], last3: .data[-3:], nonpos_close: ([.data[]|select((.close|tonumber)<=0)]|length), keys: (.data[0]|keys)}' /tmp/h.json
+          jq -c '{timestamp, n: (.data|length), first: .data[0], last: .data[-1], last3: .data[-3:], nonpos_close: ([.data[]|select((.close|tonumber)<=0)]|length), keys: (.data[0]|keys)}' /tmp/h.json || true
 
           echo; echo "##### intraday layout _SPX"
           get "$B/charts/intraday/_SPX.json" /tmp/i.json; echo
-          jq -c '{timestamp, n: (.data|length), first: .data[0], last: .data[-1], days: ([.data[].datetime[0:10]]|unique)}' /tmp/i.json
+          jq -c '{timestamp, n: (.data|length), first: .data[0], last: .data[-1], days: ([.data[].datetime[0:10]]|unique)}' /tmp/i.json || true
 
           echo; echo "##### candidate symbols (quote endpoint): status, price, prev close, time"
           for s in _SPX _NDX _RUT _VIX _DJX _XSP _OEX DIA SPY QQQ IWM GLD SLV TLT IEF USO UUP FXE EWP EZU IBIT BITO VGK EWG; do
-            code=$(curl -sS -m 25 -A "$UA" -o /tmp/q.json -w '%{http_code}' "$B/quotes/$s.json" || echo fail)
+            code=$(curl -sSL -m 25 -A "$UA" -o /tmp/q.json -w '%{http_code}' "$B/quotes/$s.json" || echo fail)
             if [ "$code" = "200" ]; then
               echo -n "$s  200  "; jq -c '.data | {symbol, type: .security_type, current_price, price_change, price_change_percent, prev_day_close, close, last_trade_time, iv30}' /tmp/q.json
             else echo "$s  $code"; fi
@@ -42,6 +43,6 @@ jobs:
 
           echo; echo "##### candidate symbols (historical endpoint)"
           for s in _NDX _RUT _VIX _DJX GLD TLT DIA; do
-            code=$(curl -sS -m 25 -A "$UA" -o /tmp/hh.json -w '%{http_code}' "$B/charts/historical/$s.json" || echo fail)
+            code=$(curl -sSL -m 25 -A "$UA" -o /tmp/hh.json -w '%{http_code}' "$B/charts/historical/$s.json" || echo fail)
             if [ "$code" = "200" ]; then echo -n "$s 200  "; jq -c '{n:(.data|length), first:.data[0].date, last:.data[-1].date, lastclose:.data[-1].close}' /tmp/hh.json; else echo "$s $code"; fi
           done
