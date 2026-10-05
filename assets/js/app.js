@@ -150,7 +150,6 @@
     btn.dataset.id = b.id;
     const hasNotes = Array.isArray(b.notes) && b.notes.length > 0;
     btn.disabled = !hasNotes;
-    btn.setAttribute('aria-label', `${b.title} by ${b.author} — ${hasNotes ? 'read my notes' : 'notes coming soon'}`);
 
     const cover = document.createElement('span');
     cover.className = 'cover';

@@ -78,10 +78,19 @@
   const ctx = E.canvas.getContext('2d');
   const S = {
     live: null, hist: null, sess: null,
-    sym: 'spx', cmp: null, hists: {}, prevMode: 'price', prevLog: false,
+    sym: 'spx', cmp: null, hists: {}, arrCache: {}, prevMode: 'price', prevLog: false,
     range: '1Y', mode: 'price', log: false,
     view: null, hover: -1, progress: 1, anim: 0, dpr: 1, w: 0, h: 0, geo: null,
   };
+
+  /** Run `fn` once `el` is within `margin` of the viewport (immediately if it already is, or if IntersectionObserver is missing). */
+  function whenNear(el, fn, margin = '900px 0px') {
+    if (!('IntersectionObserver' in window)) return fn();
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); fn(); } }, { rootMargin: margin });
+    io.observe(el);
+  }
+  window.JB = window.JB || {};
+  window.JB.whenNear = whenNear;
 
   /* ---------- loading ---------- */
   async function fetchJSON(name) {
@@ -101,11 +110,11 @@
     if (!S.live && !S.hist) { setState('error'); document.dispatchEvent(new CustomEvent('jb:market-error')); return; }
     if (!S.histRaw) document.dispatchEvent(new CustomEvent('jb:market-error')); // the risk lab needs the daily history
     S.synthetic = Boolean(S.live?.synthetic || S.hist?.synthetic);
-    applyLive();
+    applyLive(); // cheap: header, ticker, hero widget
     buildAssets();
-    if (first) { buildRanges(); initCalc(); }
-    setState('ready');
-    redraw(true);
+    // the chart, stats and calculator sit far below the fold: don't make slow phones compute them at load
+    const finish = () => { if (first) { buildRanges(); initCalc(); } setState('ready'); redraw(true); };
+    if (first) whenNear(root, finish); else finish();
   }
 
   /** Typed arrays for speed, plus today's live price appended when the nightly history lags behind. */
@@ -125,6 +134,9 @@
     if (!raw) return null;
     const { d, c } = raw;
     const q = quote(id);
+    const key = `${d.length}|${c[c.length - 1]}|${q ? q.time : ''}|${q ? q.price : ''}`;
+    const hit = S.arrCache[id];
+    if (hit && hit.key === key) return hit.val;
     let dd = d, cc = c;
     if (q && q.time) {
       const qDay = nyDayNumber(q.time * 1000);
@@ -134,7 +146,9 @@
     const xs = new Float64Array(dd.length);
     const ys = new Float64Array(dd.length);
     for (let i = 0; i < dd.length; i++) { xs[i] = dd[i] * DAY; ys[i] = cc[i]; }
-    return { d: dd, xs, ys };
+    const val = { d: dd, xs, ys };
+    S.arrCache[id] = { key, val };
+    return val;
   }
   const quote = (id) => S.live?.quotes?.find((q) => q.id === id) || null;
   const spxQuote = () => quote('spx');

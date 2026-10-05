@@ -202,7 +202,7 @@ kbd { font: 500 .72rem var(--mono); padding: .15rem .4rem; border: 1px solid var
 .ticker-track { display: flex; width: max-content; animation: tick var(--dur, 80s) linear infinite; will-change: transform; }
 .ticker:hover .ticker-track, .ticker:focus-within .ticker-track { animation-play-state: paused; }
 @keyframes tick { to { transform: translateX(-50%); } }
-.tk { display: flex; align-items: center; gap: .65rem; padding: .8rem 1.5rem; font: 500 .78rem/1 var(--mono); white-space: nowrap; border-right: 1px solid rgba(255,255,255,.07); }
+.tk { display: flex; align-items: center; gap: .65rem; padding: .8rem 1.5rem; background: #0c110e; font: 500 .78rem/1 var(--mono); white-space: nowrap; border-right: 1px solid rgba(255,255,255,.07); }
 .tk-name { color: #9b978b; letter-spacing: .04em; }
 .tk-price { color: #efe9dd; font-variant-numeric: tabular-nums; }
 .tk-chg { font-variant-numeric: tabular-nums; }
@@ -375,7 +375,7 @@ kbd { font: 500 .72rem var(--mono); padding: .15rem .4rem; border: 1px solid var
 .pf-head .display { margin: 0; }
 .pf-sub { color: var(--ink-2); font-size: 1.02rem; max-width: 34rem; }
 @media (max-width: 880px) { .pf-head { grid-template-columns: 1fr; } }
-.pf-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1.25rem; }
+.pf-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
 .pf-side { display: grid; gap: 1.25rem; align-content: start; }
 .pf-card { padding: clamp(1.3rem, 2.6vw, 2rem); border-radius: 26px; background: var(--surface); border: 1px solid var(--rule); }
 .pf-hero { background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 9%, var(--surface)), var(--surface) 60%); }
@@ -624,3 +624,9 @@ dialog { margin: auto; }
 .mk-legend .note { margin-left: auto; font-size: .76rem; color: var(--ink-3); }
 .seg button[aria-disabled='true'] { opacity: .38; cursor: default; }
 .seg button[aria-disabled='true']:hover { background: transparent; color: var(--ink-2); }
+
+/* ---------- rendering cost ---------- */
+/* Static sections far below the fold are not rendered until they are near the viewport (the market and lab
+   sections are left alone because their charts measure their own size). */
+#education, #experience, #portfolio, #projects, #reading { content-visibility: auto; contain-intrinsic-size: auto 900px; }
+@media print { #education, #experience, #portfolio, #projects, #reading { content-visibility: visible; } }
