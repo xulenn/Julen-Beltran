@@ -161,3 +161,37 @@ test('run(): everything down and nothing cached -> fails loudly instead of writi
     await assert.rejects(run(dir, silent), /No market data/);
   } finally { restore(); }
 });
+
+test('run(): every asset with history gets its own file; Dow is scaled; Nasdaq-100 has none; live.json lists what is switchable', async () => {
+  const restore = mockFetch(happyHandler({ failHistory: ['_NDX'] }));
+  try {
+    const dir = await mkdtemp(join(tmpdir(), 'md-'));
+    await run(dir, silent);
+    const live = JSON.parse(await readFile(join(dir, 'live.json'), 'utf8'));
+    assert.deepEqual(live.histories.sort(), SYMBOLS.filter((s) => s.id !== 'ndx').map((s) => s.id).sort());
+    const dji = JSON.parse(await readFile(join(dir, 'hist-dji.json'), 'utf8'));
+    const gld = JSON.parse(await readFile(join(dir, 'hist-gld.json'), 'utf8'));
+    assert.equal(dji.id, 'dji');
+    assert.equal(dji.d.length, gld.d.length);
+    assert.ok(Math.abs(dji.c[100] - gld.c[100] * 100) < 0.51, 'same synthetic source series, Dow = DJX x 100 (within rounding)');
+    await assert.rejects(readFile(join(dir, 'hist-ndx.json'), 'utf8'), /ENOENT/);
+  } finally { restore(); }
+});
+
+test('run(): a missing per-asset file is retried only after a cool-off, not on every run', async () => {
+  const { rm, writeFile } = await import('node:fs/promises');
+  const restore = mockFetch(happyHandler());
+  try {
+    const dir = await mkdtemp(join(tmpdir(), 'md-'));
+    await run(dir, silent);
+    await rm(join(dir, 'hist-gld.json'));
+    await run(dir, silent); // history is fresh and the file was lost seconds ago: do not hammer the source
+    await assert.rejects(readFile(join(dir, 'hist-gld.json'), 'utf8'), /ENOENT/);
+    const h = JSON.parse(await readFile(join(dir, 'history.json'), 'utf8'));
+    h.generated = new Date(Date.now() - 2 * 3_600_000).toISOString(); // two hours old
+    await writeFile(join(dir, 'history.json'), JSON.stringify(h));
+    await run(dir, silent);
+    const back = JSON.parse(await readFile(join(dir, 'hist-gld.json'), 'utf8'));
+    assert.equal(back.id, 'gld');
+  } finally { restore(); }
+});
